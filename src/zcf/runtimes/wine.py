@@ -19,13 +19,19 @@ from zcf.core.models import (
     ValidationResult,
 )
 from zcf.runtimes.base import RuntimeAdapterInterface
+from zcf.runtimes.prefix_manager import WinePrefixManager
 
 
 class WineAdapter(RuntimeAdapterInterface):
     """Adapter for executing Windows PE applications via Wine."""
 
-    def __init__(self, base_prefix_dir: Optional[str] = None):
-        self.base_prefix_dir = base_prefix_dir or os.path.expanduser("~/.zcf/prefixes")
+    def __init__(self, prefix_manager: Optional[WinePrefixManager] = None, base_prefix_dir: Optional[str] = None):
+        if prefix_manager:
+            self.prefix_manager = prefix_manager
+        elif base_prefix_dir:
+            self.prefix_manager = WinePrefixManager(base_dir=base_prefix_dir)
+        else:
+            self.prefix_manager = WinePrefixManager()
 
     def get_id(self) -> str:
         return "runtime.wine"
@@ -62,12 +68,16 @@ class WineAdapter(RuntimeAdapterInterface):
     def prepare_environment(
         self, app: ApplicationDescription, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        prefix_path = os.path.join(self.base_prefix_dir, app.sha256[:16])
+        prefix_path = self.prefix_manager.get_prefix_path(app.sha256)
         os.makedirs(prefix_path, exist_ok=True)
 
         env_vars = os.environ.copy()
         env_vars["WINEPREFIX"] = prefix_path
         env_vars["WINEDEBUG"] = config.get("winedebug", "-all") if config else "-all"
+
+        # Apply DLL overrides if specified
+        if config and "dll_overrides" in config:
+            env_vars = self.prefix_manager.set_dll_overrides(env_vars, config["dll_overrides"])
 
         if config and "environment_variables" in config:
             env_vars.update(config["environment_variables"])

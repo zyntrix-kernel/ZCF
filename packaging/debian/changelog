@@ -1,0 +1,6 @@
+zyntrix-compatibility-fabric (0.1.0-1) resolute; urgency=medium
+
+  * Initial release for Ubuntu / Debian.
+  * Integration with REA, Wine, Proton, and QEMU.
+
+ -- Zyntrix Labs Engineering <engineering@zyntrixlabs.org>  Sat, 24 Oct 2026 20:00:00 +0000

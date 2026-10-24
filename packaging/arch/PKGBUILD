@@ -1,0 +1,29 @@
+# Maintainer: Zyntrix Labs Engineering <engineering@zyntrixlabs.org>
+pkgname=zyntrix-compatibility-fabric-git
+_pkgname=zcf
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Universal Application Compatibility Fabric and Runtime Orchestrator"
+arch=('any')
+url="https://github.com/zyntrix-labs/zcf"
+license=('Apache-2.0')
+depends=('python>=3.10')
+optdepends=(
+    'wine: Windows application compatibility'
+    'qemu-user: Cross-architecture CPU emulation'
+    'strace: Dynamic syscall tracing'
+    'box64: x86_64 dynamic translation on ARM64'
+)
+makedepends=('git' 'python-build' 'python-installer' 'python-wheel' 'python-setuptools')
+source=("git+https://github.com/zyntrix-labs/zcf.git")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/$_pkgname"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "$srcdir/$_pkgname"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+}

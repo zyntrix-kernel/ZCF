@@ -1,14 +1,17 @@
 """
 Runtime Adapter Registry for ZCF.
-Maintains available adapters and handles discovery.
+Maintains and coordinates all registered compatibility runtime adapters.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Type
+from typing import Dict, List, Optional
 
+from zcf.runtimes.android import AndroidContainerAdapter
 from zcf.runtimes.base import RuntimeAdapterInterface
+from zcf.runtimes.box64 import Box64Adapter
 from zcf.runtimes.native import NativeAdapter
+from zcf.runtimes.proton import ProtonAdapter
 from zcf.runtimes.qemu import QemuUserAdapter
 from zcf.runtimes.wine import WineAdapter
 
@@ -23,7 +26,10 @@ class RuntimeRegistry:
     def _register_defaults(self):
         self.register(NativeAdapter())
         self.register(WineAdapter())
+        self.register(ProtonAdapter())
         self.register(QemuUserAdapter())
+        self.register(Box64Adapter())
+        self.register(AndroidContainerAdapter())
 
     def register(self, adapter: RuntimeAdapterInterface):
         self._adapters[adapter.get_id()] = adapter

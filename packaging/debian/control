@@ -1,0 +1,17 @@
+Source: zyntrix-compatibility-fabric
+Section: utils
+Priority: optional
+Maintainer: Zyntrix Labs Engineering <engineering@zyntrixlabs.org>
+Build-Depends: debhelper-compat (= 13), dh-python, python3-all, python3-setuptools
+Standards-Version: 4.6.2
+Homepage: https://github.com/zyntrix-labs/zcf
+
+Package: zcf
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends}, python3 (>= 3.10)
+Recommends: wine64, qemu-user, strace
+Suggests: box64, waydroid
+Description: Universal Application Compatibility Fabric and Runtime Orchestrator
+ ZCF is an open-source, distribution-independent application compatibility platform.
+ It coordinates runtime technologies (Wine, Proton, QEMU, Box64), diagnoses application
+ execution failures, and shares compatibility profiles across Linux distributions.

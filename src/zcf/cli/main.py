@@ -1,21 +1,26 @@
 """
 Command-Line Interface (CLI) for ZCF.
-Provides user-facing commands for inspection, planning, testing, diagnostics, and database querying.
+Provides user-facing commands for inspection, planning, testing, research, diagnostics, sync, and dashboard.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import List, Optional
 
 from zcf import __version__
 from zcf.compatibility_db.database import CompatibilityDatabase
+from zcf.compatibility_db.sync import CompatibilitySyncManager
 from zcf.diagnostics.analyzer import DiagnosticEngine
+from zcf.diagnostics.remediator import AutomatedRemediator
 from zcf.environment.inspector import EnvironmentInspector
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
+from zcf.research.engine import CompatibilityResearchEngine
+from zcf.runtimes.prefix_manager import WinePrefixManager
 from zcf.runtimes.registry import RuntimeRegistry
 from zcf.security.controller import SecurityController
 
@@ -40,9 +45,15 @@ def cmd_inspect(args):
             print(f"  Binary Format:  {app.format.value.upper()}")
             print(f"  Architecture:   {app.architecture.value}")
             print(f"  Subsystem:      {app.subsystem.value}")
-            print(f"  Is Managed:     {'Yes (.NET / CLI)' if app.is_managed else 'No (Native)'}")
+            print(f"  Is Managed:     {'Yes (.NET / CLI / Dalvik)' if app.is_managed else 'No (Native)'}")
+            if app.runtime_family:
+                print(f"  Runtime Family: {app.runtime_family}")
             if app.entry_point:
                 print(f"  Entry Point:    {app.entry_point}")
+            if app.declared_dependencies:
+                dep_sample = ", ".join(app.declared_dependencies[:6])
+                more = f" ... and {len(app.declared_dependencies) - 6} more" if len(app.declared_dependencies) > 6 else ""
+                print(f"  Dependencies:   {dep_sample}{more}")
             if app.limitations:
                 print(f"  Limitations:    {', '.join(app.limitations)}")
     except Exception as e:
@@ -159,6 +170,10 @@ def cmd_test(args):
 
 def cmd_diag(args):
     diag = DiagnosticEngine()
+    remediator = AutomatedRemediator()
+    app_inspector = ApplicationInspector()
+    env_inspector = EnvironmentInspector()
+
     try:
         with open(args.log_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
@@ -173,17 +188,66 @@ def cmd_diag(args):
             else:
                 print(f"  Detected {len(events)} diagnostic event(s):\n")
                 for i, ev in enumerate(events, 1):
-                    print(f"  [{i}] Signature: {ev.signature} (Confidence: {ev.confidence*100:.0f}%)")
-                    print(f"      Matched:   {ev.matched_text}")
-                    print(f"      Root Cause:{ev.root_cause}")
-                    print(f"      Action:    {ev.remediation}\n")
+                    print(f"  [{i}] Signature:  {ev.signature} (Confidence: {ev.confidence*100:.0f}%)")
+                    print(f"      Matched:    {ev.matched_text}")
+                    print(f"      Root Cause: {ev.root_cause}")
+                    print(f"      Action:     {ev.remediation}\n")
+
+                # If target artifact is provided, synthesize remediation plan
+                if hasattr(args, "target") and args.target and os.path.exists(args.target):
+                    app = app_inspector.inspect(args.target)
+                    env = env_inspector.inspect()
+                    rem_plan = remediator.synthesize(app, env, events)
+                    format_header("Automated Remediation Actions")
+                    if rem_plan.package_install_commands:
+                        print("  Suggested Package Installation Command(s):")
+                        for cmd in rem_plan.package_install_commands:
+                            print(f"    $ {cmd}")
+                    if rem_plan.dll_overrides:
+                        print(f"  Wine DLL Overrides: {rem_plan.dll_overrides}")
+                    if rem_plan.wrapper_prefix:
+                        print(f"  Command Wrapper Prefix: {rem_plan.wrapper_prefix}")
     except Exception as e:
         print(f"Error during log analysis: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 
+def cmd_research(args):
+    engine = CompatibilityResearchEngine()
+    try:
+        with open(args.log_path, "r", encoding="utf-8", errors="ignore") as f:
+            log_content = f.read()
+
+        format_header(f"ZCF Compatibility Research Workflow: {os.path.basename(args.artifact_path)}")
+        case = engine.investigate(args.artifact_path, log_content)
+
+        print(f"  Case ID:          {case.case_id}")
+        print(f"  Target SHA-256:   {case.target_sha256}")
+        print(f"  Outcome Status:   {case.outcome_status.upper()}")
+        if case.rea_evidence_id:
+            print(f"  REA Evidence ID:  {case.rea_evidence_id}")
+
+        print(f"\n  Formulated Hypotheses ({len(case.hypotheses)}):")
+        for h in case.hypotheses:
+            print(f"    [{h.hypothesis_id}] {h.statement} (Confidence: {h.confidence*100:.0f}%)")
+            print(f"        Basis: {h.basis}")
+
+        if case.verified_workarounds:
+            print(f"\n  Verified Workarounds ({len(case.verified_workarounds)}):")
+            for w in case.verified_workarounds:
+                print(f"    [+] {w['issue']}: {w['solution']}")
+                print(f"        Automated Apply: {w.get('automated_apply', False)}")
+
+        print("\n  [Knowledge Base] Record successfully cataloged into local database.")
+    except Exception as e:
+        print(f"Error during research investigation: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_db(args):
     db = CompatibilityDatabase()
+    sync = CompatibilitySyncManager(db)
+
     if args.action == "list":
         entries = db.list_all()
         format_header(f"ZCF Compatibility Database ({len(entries)} entries)")
@@ -199,16 +263,53 @@ def cmd_db(args):
         else:
             print(f"Entry not found: {args.id}", file=sys.stderr)
             sys.exit(1)
+    elif args.action == "export":
+        out = sync.export_bundle(args.output or "zcf_evidence_bundle.json")
+        print(f"Exported compatibility evidence bundle to: {out}")
+    elif args.action == "import":
+        cnt = sync.import_bundle(args.file)
+        print(f"Imported and reconciled {cnt} compatibility records.")
+
+
+def cmd_dashboard(args):
+    env = EnvironmentInspector().inspect()
+    db = CompatibilityDatabase()
+    entries = db.list_all()
+
+    print("\n" + "=" * 62)
+    print("      ZYNTRIX COMPATIBILITY FABRIC (ZCF) - DASHBOARD")
+    print("=" * 62)
+    print(f"  Platform:         {env.os_name.capitalize()} {env.distribution or ''} ({env.architecture})")
+    print(f"  Kernel Release:   {env.kernel_version[:35]}")
+    print(f"  Active Display:   {env.display_server.value.upper()}")
+    print(f"  Hardware Cores:   {env.logical_cores} Logical CPUs | Memory: {env.total_memory_mb:,} MB")
+    print("-" * 62)
+    print("  RUNTIME ORCHESTRATION STATUS:")
+    for r in env.available_runtimes:
+        symbol = "[*]" if r.installed else "[ ]"
+        ver = f"({r.version})" if r.version else ("Ready" if r.installed else "Missing")
+        print(f"    {symbol} {r.name:<34} : {ver}")
+    print("-" * 62)
+    print("  KNOWLEDGE BASE & RESEARCH STATUS:")
+    print(f"    Cataloged Application Profiles : {len(entries)}")
+    verified_count = sum(1 for e in entries if "compatible" in e.status.value)
+    print(f"    Verified Compatible Entries    : {verified_count}")
+    print(f"    REA Integration                : ACTIVE (Evidence Graphs Ready)")
+    print("=" * 62 + "\n")
 
 
 def main(argv: Optional[List[str]] = None):
     parser = argparse.ArgumentParser(
         prog="zcf",
-        description="Zyntrix Compatibility Fabric (ZCF) — Universal Application Compatibility Engine",
+        description="Zyntrix Compatibility Fabric (ZCF) - Universal Application Compatibility Engine",
     )
     parser.add_argument("--version", action="version", version=f"ZCF {__version__} (Apache-2.0)")
 
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+
+    # dashboard
+    p_dash = subparsers.add_parser("dashboard", help="Show system dashboard and compatibility status")
+    p_dash.set_defaults(func=cmd_dashboard)
 
     # inspect
     p_inspect = subparsers.add_parser("inspect", help="Inspect an application binary or script")
@@ -236,20 +337,29 @@ def main(argv: Optional[List[str]] = None):
     # diag
     p_diag = subparsers.add_parser("diag", help="Analyze failure log and recommend remediations")
     p_diag.add_argument("log_path", help="Path to error log file")
+    p_diag.add_argument("--target", help="Optional path to target application for automated remediation plan")
     p_diag.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_diag.set_defaults(func=cmd_diag)
 
+    # research
+    p_research = subparsers.add_parser("research", help="Run 11-step compatibility research workflow")
+    p_research.add_argument("artifact_path", help="Path to application binary")
+    p_research.add_argument("log_path", help="Path to execution error log")
+    p_research.set_defaults(func=cmd_research)
+
     # db
     p_db = subparsers.add_parser("db", help="Query or inspect the compatibility knowledge base")
-    p_db.add_argument("action", choices=["list", "show"], help="Action to perform")
+    p_db.add_argument("action", choices=["list", "show", "export", "import"], help="Action to perform")
     p_db.add_argument("--id", help="Entry ID (for 'show' action)")
+    p_db.add_argument("--output", help="Output file path (for 'export')")
+    p_db.add_argument("--file", help="Input file path (for 'import')")
     p_db.set_defaults(func=cmd_db)
 
     args = parser.parse_args(argv)
     if hasattr(args, "func"):
         args.func(args)
     else:
-        parser.print_help()
+        cmd_dashboard(args)
 
 
 if __name__ == "__main__":

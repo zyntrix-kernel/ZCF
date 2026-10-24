@@ -167,6 +167,37 @@ class EnvironmentInspector:
             )
         )
 
+        # 5. Valve Proton
+        from zcf.runtimes.proton import ProtonAdapter
+        proton_bin = ProtonAdapter()._find_proton_binary()
+        proton_installed = proton_bin is not None
+        runtimes.append(
+            RuntimeInfo(
+                runtime_id="runtime.proton",
+                name="Valve Proton Gaming Runtime",
+                installed=proton_installed,
+                version="Steam-Managed" if proton_installed else None,
+                binary_path=proton_bin,
+                supported_formats=["pe"],
+                supported_architectures=["x86_64"],
+            )
+        )
+
+        # 6. Waydroid Android Container
+        waydroid_bin = shutil.which("waydroid")
+        waydroid_installed = waydroid_bin is not None
+        runtimes.append(
+            RuntimeInfo(
+                runtime_id="runtime.android",
+                name="Waydroid Android Container Runtime",
+                installed=waydroid_installed,
+                version=self._get_command_version(waydroid_bin, ["version"]) if waydroid_installed else None,
+                binary_path=waydroid_bin,
+                supported_formats=["archive"],
+                supported_architectures=["arm64", "x86_64", "universal"],
+            )
+        )
+
         return runtimes
 
     def _get_command_version(self, binary_path: Optional[str], args: List[str]) -> Optional[str]:

@@ -1,12 +1,12 @@
 """
 Pure-Python Executable and Linkable Format (ELF) binary parser.
-Extracts architecture, endianness, interpreter, and dynamic libraries without external dependencies.
+Extracts architecture, endianness, interpreter, dynamic libraries (DT_NEEDED), sections, and RPATH without external dependencies.
 """
 
 from __future__ import annotations
 
 import struct
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from zcf.core.exceptions import UnsupportedFormatError
 from zcf.core.models import Architecture, BinaryFormat, Subsystem
@@ -81,8 +81,10 @@ class ELFParser:
 
         arch = ELF_MACHINE_MAP.get(e_machine, Architecture.UNKNOWN)
 
-        # Parse Program Headers for PT_INTERP (dynamic interpreter)
+        # Parse Program Headers for PT_INTERP and PT_DYNAMIC
         interpreter = None
+        dynamic_ph: Optional[Tuple[int, int]] = None  # (offset, size)
+
         if e_phoff > 0 and e_phnum > 0 and e_phentsize > 0:
             for i in range(e_phnum):
                 ph_offset = e_phoff + (i * e_phentsize)
@@ -101,7 +103,91 @@ class ELFParser:
                     if p_offset + p_filesz <= self.length:
                         raw_interp = self.data[p_offset : p_offset + p_filesz]
                         interpreter = raw_interp.split(b"\x00")[0].decode("utf-8", errors="ignore")
-                    break
+                elif p_type == 2:  # PT_DYNAMIC
+                    dynamic_ph = (p_offset, p_filesz)
+
+        # Parse Section Headers
+        sections = []
+        needed_libraries: List[str] = []
+        rpath = None
+        runpath = None
+
+        if e_shoff > 0 and e_shnum > 0 and e_shentsize > 0 and e_shoff + (e_shnum * e_shentsize) <= self.length:
+            raw_sections = []
+            for i in range(e_shnum):
+                s_off = e_shoff + (i * e_shentsize)
+                if is_64bit:
+                    sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_align, sh_entsize = struct.unpack_from(
+                        f"{endian}IIQQQQIIQQ", self.data, s_off
+                    )
+                else:
+                    sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_align, sh_entsize = struct.unpack_from(
+                        f"{endian}IIIIIIIIII", self.data, s_off
+                    )
+                raw_sections.append({
+                    "name_idx": sh_name,
+                    "type": sh_type,
+                    "offset": sh_offset,
+                    "size": sh_size,
+                    "link": sh_link,
+                })
+
+            # Read section names from shstrtab
+            shstrtab_offset = 0
+            shstrtab_size = 0
+            if e_shstrndx < len(raw_sections):
+                shstrtab_offset = raw_sections[e_shstrndx]["offset"]
+                shstrtab_size = raw_sections[e_shstrndx]["size"]
+
+            for sec in raw_sections:
+                name = ""
+                n_idx = sec["name_idx"]
+                if shstrtab_offset > 0 and n_idx < shstrtab_size:
+                    end = self.data.find(b"\x00", shstrtab_offset + n_idx)
+                    if end != -1:
+                        name = self.data[shstrtab_offset + n_idx : end].decode("utf-8", errors="ignore")
+                sec["name"] = name
+                if name:
+                    sections.append(name)
+
+            # Find .dynamic section and its linked string table
+            for sec in raw_sections:
+                if sec["type"] == 6:  # SHT_DYNAMIC
+                    strtab_idx = sec["link"]
+                    if strtab_idx < len(raw_sections):
+                        dynstr_off = raw_sections[strtab_idx]["offset"]
+                        dynstr_size = raw_sections[strtab_idx]["size"]
+                        dyn_off = sec["offset"]
+                        dyn_size = sec["size"]
+                        entry_size = 16 if is_64bit else 8
+
+                        curr = dyn_off
+                        while curr + entry_size <= dyn_off + dyn_size and curr + entry_size <= self.length:
+                            if is_64bit:
+                                d_tag, d_val = struct.unpack_from(f"{endian}qQ", self.data, curr)
+                            else:
+                                d_tag, d_val = struct.unpack_from(f"{endian}iI", self.data, curr)
+
+                            if d_tag == 0:  # DT_NULL
+                                break
+                            elif d_tag == 1:  # DT_NEEDED
+                                if dynstr_off + d_val < dynstr_off + dynstr_size:
+                                    end = self.data.find(b"\x00", dynstr_off + d_val)
+                                    if end != -1:
+                                        lib_name = self.data[dynstr_off + d_val : end].decode("utf-8", errors="ignore")
+                                        if lib_name and lib_name not in needed_libraries:
+                                            needed_libraries.append(lib_name)
+                            elif d_tag == 15:  # DT_RPATH
+                                if dynstr_off + d_val < dynstr_off + dynstr_size:
+                                    end = self.data.find(b"\x00", dynstr_off + d_val)
+                                    if end != -1:
+                                        rpath = self.data[dynstr_off + d_val : end].decode("utf-8", errors="ignore")
+                            elif d_tag == 29:  # DT_RUNPATH
+                                if dynstr_off + d_val < dynstr_off + dynstr_size:
+                                    end = self.data.find(b"\x00", dynstr_off + d_val)
+                                    if end != -1:
+                                        runpath = self.data[dynstr_off + d_val : end].decode("utf-8", errors="ignore")
+                            curr += entry_size
 
         return {
             "format": BinaryFormat.ELF,
@@ -113,4 +199,7 @@ class ELFParser:
             "is_64bit": is_64bit,
             "is_pie": e_type == 3,  # ET_DYN (PIE executable or shared library)
             "interpreter": interpreter,
+            "needed_libraries": needed_libraries,
+            "rpath": rpath or runpath,
+            "sections": sections,
         }

@@ -1,6 +1,6 @@
 """
 Unified Application and Artifact Inspector.
-Orchestrates binary parsers, computes cryptographic digests, and integrates with REA.
+Orchestrates PE, ELF, Mach-O, APK, and Script parsers with cryptographic hashing.
 """
 
 from __future__ import annotations
@@ -11,7 +11,9 @@ from typing import Any, Dict, List, Optional
 
 from zcf.core.exceptions import InspectionError, UnsupportedFormatError
 from zcf.core.models import ApplicationDescription, Architecture, BinaryFormat, Subsystem
+from zcf.inspector.apk import APKParser
 from zcf.inspector.elf import ELFParser
+from zcf.inspector.macho import MachOParser
 from zcf.inspector.pe import PEParser
 from zcf.inspector.scripts import ScriptParser
 
@@ -33,12 +35,12 @@ class ApplicationInspector:
         sha256 = self._compute_sha256(artifact_path)
         file_name = os.path.basename(artifact_path)
 
+        # Read up to 2MB to capture sections, dynamic symbols, and import tables safely
+        max_read = min(file_size, 2 * 1024 * 1024)
         with open(artifact_path, "rb") as f:
-            header_bytes = f.read(4096)
+            header_bytes = f.read(max_read)
 
         parsed_info = self._detect_and_parse(header_bytes, file_name)
-
-        # Basic security indicator scan
         security_indicators = self._detect_security_indicators(header_bytes)
 
         return ApplicationDescription(
@@ -51,13 +53,17 @@ class ApplicationInspector:
             subsystem=parsed_info.get("subsystem", Subsystem.UNKNOWN),
             is_managed=parsed_info.get("is_managed", False),
             runtime_family=parsed_info.get("runtime_family"),
-            declared_dependencies=parsed_info.get("declared_dependencies", []),
+            declared_dependencies=parsed_info.get("declared_dependencies")
+            or parsed_info.get("imported_dlls")
+            or parsed_info.get("needed_libraries")
+            or [],
             entry_point=parsed_info.get("entry_point"),
             security_indicators=security_indicators,
             limitations=parsed_info.get("limitations", []),
         )
 
     def _detect_and_parse(self, data: bytes, file_name: str) -> Dict[str, Any]:
+        # 1. Windows PE
         if len(data) >= 2 and data[:2] == b"MZ":
             try:
                 parser = PEParser(data)
@@ -70,6 +76,7 @@ class ApplicationInspector:
                     "limitations": [f"Malformed PE header: {str(e)}"],
                 }
 
+        # 2. Linux / BSD ELF
         if len(data) >= 4 and data[:4] == b"\x7fELF":
             try:
                 parser = ELFParser(data)
@@ -82,6 +89,33 @@ class ApplicationInspector:
                     "limitations": [f"Malformed ELF header: {str(e)}"],
                 }
 
+        # 3. Apple Mach-O (Thin & Universal Fat)
+        macho_sigs = (
+            b"\xfe\xed\xfa\xce",
+            b"\xce\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xcf",
+            b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe",
+            b"\xbe\xba\xfe\xca",
+        )
+        if len(data) >= 4 and data[:4] in macho_sigs:
+            try:
+                parser = MachOParser(data)
+                return parser.parse()
+            except UnsupportedFormatError as e:
+                return {
+                    "format": BinaryFormat.MACHO,
+                    "architecture": Architecture.UNKNOWN,
+                    "subsystem": Subsystem.POSIX,
+                    "limitations": [f"Malformed Mach-O header: {str(e)}"],
+                }
+
+        # 4. ZIP Archive / Android APK
+        if len(data) >= 4 and data[:4] == b"PK\x03\x04":
+            parser = APKParser(data, file_name)
+            return parser.parse()
+
+        # 5. Scripts and Interpreted Files
         if data.startswith(b"#!") or any(file_name.endswith(ext) for ext in (".py", ".sh", ".js", ".bat", ".cmd")):
             parser = ScriptParser(data, file_name)
             return parser.parse()

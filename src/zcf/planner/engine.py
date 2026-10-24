@@ -43,6 +43,11 @@ class CompatibilityPlanner:
         if app.security_indicators.get("requires_kernel_driver"):
             missing_reqs.append("Application requires Windows kernel-level ring-0 driver (unsupported in userspace)")
 
+        is_graphics_heavy = any(
+            d.lower() in ("d3d11.dll", "d3d12.dll", "dxgi.dll", "vulkan-1.dll", "opengl32.dll")
+            for d in app.declared_dependencies
+        )
+
         for adapter in self.registry.list_adapters():
             rid = adapter.get_id()
             validation = adapter.validate(app, env)
@@ -70,6 +75,14 @@ class CompatibilityPlanner:
                         score = 0.70
                         notes = "Native execution with potential runtime dependencies"
 
+                elif rid == "runtime.proton":
+                    if not installed:
+                        score = 0.0
+                        notes = "Proton runner is not installed in standard Steam paths"
+                    else:
+                        score = 0.95 if is_graphics_heavy else 0.88
+                        notes = "Proton gaming runner with DXVK Vulkan acceleration"
+
                 elif rid == "runtime.wine":
                     if not installed:
                         score = 0.0
@@ -85,6 +98,17 @@ class CompatibilityPlanner:
                         else:
                             notes = "Wine installed; direct Win32/Win64 API translation supported"
 
+                elif rid == "runtime.box64":
+                    if not installed:
+                        score = 0.0
+                        notes = "Box64 is not installed on host system"
+                    elif env.architecture == "arm64":
+                        score = 0.92
+                        notes = "Box64 dynamic translation with native library wrapping (optimal for ARM64)"
+                    else:
+                        score = 0.60
+                        notes = "Box64 available, but host CPU is not ARM64"
+
                 elif rid == "runtime.qemu-user":
                     if not installed:
                         score = 0.0
@@ -92,6 +116,14 @@ class CompatibilityPlanner:
                     else:
                         score = 0.85
                         notes = f"QEMU user-mode translation ready for target {app.architecture.value}"
+
+                elif rid == "runtime.android":
+                    if not installed:
+                        score = 0.0
+                        notes = "Android APK format identified, but Waydroid is not installed"
+                    else:
+                        score = 0.90
+                        notes = "Waydroid container runtime available for Android APK execution"
 
             candidates.append(
                 CandidateEvaluation(
@@ -115,24 +147,32 @@ class CompatibilityPlanner:
                 reasoning = f"Direct native execution via {selected_name} is the optimal path."
                 safe_steps.append("Execute via native process launcher or run dry-run verification.")
 
-            elif selected_id == "runtime.wine":
+            elif selected_id in ("runtime.wine", "runtime.proton"):
                 execution_mode = ExecutionMode.TRANSLATION
-                satisfied_reqs.append("Wine compatibility layer is installed and verified on host")
+                satisfied_reqs.append(f"{selected_name} is installed and verified on host")
                 satisfied_reqs.append("Windows PE binary structure validated")
                 reasoning = f"Windows application on Linux host; routing to {selected_name}."
                 safe_steps.append("Initialize isolated application prefix under ~/.zcf/prefixes.")
                 safe_steps.append("Run dry-run or diagnostic trace to verify DLL dependencies.")
 
-            elif selected_id == "runtime.qemu-user":
+            elif selected_id in ("runtime.qemu-user", "runtime.box64"):
                 execution_mode = ExecutionMode.EMULATION
                 satisfied_reqs.append("Target ELF binary format validated")
-                satisfied_reqs.append(f"QEMU user-mode binary available for {app.architecture.value}")
+                satisfied_reqs.append(f"{selected_name} available for {app.architecture.value}")
                 reasoning = (
                     f"Host architecture ({env.architecture}) differs from target ({app.architecture.value}); "
                     f"routing to {selected_name}."
                 )
                 safe_steps.append("Verify target multiarch rootfs libraries if dynamically linked.")
                 safe_steps.append("Execute in controlled userspace emulation.")
+
+            elif selected_id == "runtime.android":
+                execution_mode = ExecutionMode.TRANSLATION
+                satisfied_reqs.append("Android APK package structure verified")
+                satisfied_reqs.append("Waydroid container runtime detected")
+                reasoning = "Android APK target package; routing to Waydroid container."
+                safe_steps.append("Verify Waydroid container status ('waydroid status').")
+                safe_steps.append("Install and launch APK inside container.")
         else:
             # Handle uninstalled candidate recommendations
             highest_score = 0.0
@@ -151,6 +191,14 @@ class CompatibilityPlanner:
                 missing_reqs.append(f"QEMU user emulator for '{app.architecture.value}' is not installed")
                 reasoning = f"Target ELF is built for {app.architecture.value}; QEMU user-mode translation required."
                 safe_steps.append("Install QEMU user package: 'sudo apt install qemu-user' or equivalent.")
+
+            elif app.format == BinaryFormat.ARCHIVE and app.runtime_family == "android-art":
+                selected_id = "runtime.android"
+                selected_name = "Waydroid Android Container Runtime"
+                execution_mode = ExecutionMode.BLOCKED
+                missing_reqs.append("Waydroid container runtime is not installed")
+                reasoning = "Target is an Android APK package; Waydroid installation is required."
+                safe_steps.append("Install Waydroid package: 'sudo apt install waydroid' and run 'waydroid init'.")
 
             else:
                 execution_mode = ExecutionMode.BLOCKED

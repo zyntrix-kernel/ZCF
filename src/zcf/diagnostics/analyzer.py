@@ -1,6 +1,6 @@
 """
 Diagnostic Engine for ZCF.
-Normalizes runtime error logs, detects failure signatures, and maps errors to actionable remediations.
+Normalizes runtime error logs, detects comprehensive failure signatures, and maps errors to actionable remediations.
 """
 
 from __future__ import annotations
@@ -35,6 +35,22 @@ DIAGNOSTIC_RULES = [
         "confidence": 0.98,
     },
     {
+        "signature": "glibc_symbol_version_missing",
+        "pattern": re.compile(r"/lib[0-9a-z_/-]+/libc\.so\.[0-9]+:\s+version\s+`([^']+)'\s+not found", re.IGNORECASE),
+        "severity": "error",
+        "root_cause_template": "Target binary requires newer GNU C Library ({0}) than host glibc provides.",
+        "remediation_template": "Execute inside an updated distribution container or upgrade host glibc runtime.",
+        "confidence": 0.95,
+    },
+    {
+        "signature": "undefined_symbol_error",
+        "pattern": re.compile(r"undefined symbol:\s+([a-zA-Z0-9_]+)", re.IGNORECASE),
+        "severity": "error",
+        "root_cause_template": "Dynamic symbol lookup failed for symbol '{0}'. Library ABI mismatch.",
+        "remediation_template": "Rebuild against matching shared library headers or verify LD_LIBRARY_PATH resolution.",
+        "confidence": 0.92,
+    },
+    {
         "signature": "wine_dll_not_found",
         "pattern": re.compile(r"err:module:(?:import_dll|load_builtin_dll)\s+Library\s+([^ ]+)\s+not found", re.IGNORECASE),
         "severity": "error",
@@ -43,12 +59,44 @@ DIAGNOSTIC_RULES = [
         "confidence": 0.95,
     },
     {
+        "signature": "wine_directx_missing",
+        "pattern": re.compile(r"(?:d3dcompiler_[0-9]+\.dll|d3dx[0-9]+_[0-9]+\.dll)\s+(?:not found|failed to load)", re.IGNORECASE),
+        "severity": "error",
+        "root_cause_template": "DirectX runtime component missing in Wine prefix.",
+        "remediation_template": "Install DirectX runtime components via winetricks ('winetricks d3dx9 d3dcompiler_47').",
+        "confidence": 0.96,
+    },
+    {
+        "signature": "vulkan_initialization_failure",
+        "pattern": re.compile(r"(?:vkCreateInstance failed|VK_ERROR_INCOMPATIBLE_DRIVER|Cannot find a compatible Vulkan installable client driver)", re.IGNORECASE),
+        "severity": "error",
+        "root_cause_template": "Vulkan hardware driver initialization failed (ICD driver missing or incompatible).",
+        "remediation_template": "Install host Vulkan GPU driver (e.g. mesa-vulkan-drivers / nvidia-vulkan-icd) or enable DXVK fallback.",
+        "confidence": 0.97,
+    },
+    {
         "signature": "exec_format_error",
         "pattern": re.compile(r"cannot execute binary file:\s+Exec format error", re.IGNORECASE),
         "severity": "error",
         "root_cause_template": "Binary architecture or format is not supported by the native host kernel.",
         "remediation_template": "Use an architecture emulation runner such as QEMU User ('qemu-aarch64') or Box64.",
         "confidence": 0.99,
+    },
+    {
+        "signature": "bad_interpreter_error",
+        "pattern": re.compile(r"bad interpreter:\s+([^:]+):\s+No such file or directory", re.IGNORECASE),
+        "severity": "error",
+        "root_cause_template": "Script shebang interpreter '{0}' is not present on the host filesystem.",
+        "remediation_template": "Install the required language interpreter (e.g. python3, bash) or adjust shebang to '#!/usr/bin/env ...'.",
+        "confidence": 0.99,
+    },
+    {
+        "signature": "illegal_instruction_trap",
+        "pattern": re.compile(r"(?:Illegal instruction|SIGILL)", re.IGNORECASE),
+        "severity": "error",
+        "root_cause_template": "CPU encountered an unsupported machine instruction (e.g. AVX2, AVX-512, SSE4.2, NEON).",
+        "remediation_template": "Use Box64/QEMU with instruction translation flags, or recompile with generic CPU flags.",
+        "confidence": 0.92,
     },
     {
         "signature": "qemu_unsupported_syscall",
@@ -81,6 +129,14 @@ DIAGNOSTIC_RULES = [
         "root_cause_template": ".NET application requires Wine Mono to execute managed CIL code.",
         "remediation_template": "Install the Wine Mono package ('sudo apt install wine-mono') or install official Microsoft .NET in the prefix.",
         "confidence": 0.95,
+    },
+    {
+        "signature": "audio_device_error",
+        "pattern": re.compile(r"(?:ALSA lib|pulse: Connection refused|DirectSound: CreateSoundBuffer failed)", re.IGNORECASE),
+        "severity": "warning",
+        "root_cause_template": "Audio subsystem initialization failed; PipeWire/PulseAudio server unreachable.",
+        "remediation_template": "Ensure user PipeWire or PulseAudio daemon is running ('systemctl --user start pipewire').",
+        "confidence": 0.90,
     },
 ]
 
