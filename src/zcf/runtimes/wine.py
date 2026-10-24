@@ -41,8 +41,8 @@ class WineAdapter(RuntimeAdapterInterface):
 
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
-            if r.runtime_id == "runtime.wine" and r.installed:
-                return True
+            if r.runtime_id == "runtime.wine":
+                return r.installed
         return shutil.which("wine64") is not None or shutil.which("wine") is not None
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:

@@ -1,0 +1,22 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Zyntrix Compatibility Fabric
+GenericName=Windows & Foreign Architecture Compatibility Runner
+Comment=Execute Windows, foreign-architecture, and packaged applications seamlessly on Linux
+Exec=zcf run %f
+Icon=system-run
+Terminal=false
+Categories=System;Emulator;Utility;
+MimeType=application/x-msdos-program;application/x-msdownload;application/x-wine-extension-exe;application/x-executable;application/vnd.android.package-archive;
+StartupNotify=true
+NoDisplay=false
+Actions=Configure;Audit;
+
+[Desktop Action Configure]
+Name=Open Compatibility Dashboard
+Exec=zcf dashboard
+
+[Desktop Action Audit]
+Name=Audit Host Environment
+Exec=zcf env

@@ -1,0 +1,54 @@
+# bash completion for zcf(1)
+
+_zcf_completions() {
+    local cur prev words cword
+    _init_completion || return
+
+    local commands="dashboard run inspect env plan test diag research db service"
+    local db_actions="list show export import"
+
+    if [[ $cword -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+        return 0
+    fi
+
+    case "${words[1]}" in
+        run)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--sandbox --no-sandbox --headless --install-deps --json" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        inspect|plan|test)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--json --dry-run" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        diag)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--target --json" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        research)
+            _filedir
+            ;;
+        db)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$db_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--id --output --file" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        *)
+            ;;
+    esac
+}
+
+complete -F _zcf_completions zcf zcf-runner

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.zyntrix.zcf</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Zyntrix Compatibility Fabric</name>
+  <summary>Universal application compatibility platform and runtime orchestrator</summary>
+  <description>
+    <p>
+      The Zyntrix Compatibility Fabric (ZCF) is an open-source, distribution-independent
+      application compatibility platform that coordinates existing compatibility engines
+      (Wine, Proton, QEMU, Box64, Waydroid), investigates software behavior, diagnoses
+      incompatibilities, and applies reproducible fixes throughout the Linux ecosystem.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Transparent binfmt_misc and desktop launcher integration for Windows and foreign architecture binaries</li>
+      <li>Deterministic, explainable runtime recommendation and constraint planner</li>
+      <li>Automated failure diagnosis with distribution-tailored remediation commands</li>
+      <li>Bubblewrap (bwrap) security sandboxing and isolated runtime prefix management</li>
+      <li>Autonomous reverse-engineering workflows backed by REA (Reverse Engineer Anything)</li>
+      <li>Headless virtual display (Xvfb) lifecycle automation for servers, containers, and CI</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">org.zyntrix.zcf.desktop</launchable>
+  <url type="homepage">https://github.com/zyntrix-labs/zcf</url>
+  <url type="bugtracker">https://github.com/zyntrix-labs/zcf/issues</url>
+  <categories>
+    <category>System</category>
+    <category>Emulator</category>
+    <category>Utility</category>
+  </categories>
+  <provides>
+    <binary>zcf</binary>
+    <binary>zcf-runner</binary>
+    <mediatype>application/x-msdos-program</mediatype>
+    <mediatype>application/x-msdownload</mediatype>
+  </provides>
+  <releases>
+    <release version="0.2.0" date="2026-10-24">
+      <description>
+        <p>Production release featuring execution orchestration, binfmt_misc kernel integration, multi-architecture inspection, and automated remediation synthesis.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

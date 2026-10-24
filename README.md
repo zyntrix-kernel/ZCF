@@ -3,10 +3,12 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: Cross-Distribution](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-green.svg)](#)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#)
-[![Tests: 31 Passed (100%)](https://img.shields.io/badge/Tests-31%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Tests: 40 Passed (100%)](https://img.shields.io/badge/Tests-40%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Release: v0.2.0 Distro-Grade](https://img.shields.io/badge/Release-v0.2.0%20Distro--Grade-blue.svg)](#)
 [![REA: 6.7.0 Verified](https://img.shields.io/badge/REA-6.7.0%20Verified-purple.svg)](docs/REA_SETUP.md)
 
-**Universal application compatibility platform, runtime orchestrator, and evidence-backed research infrastructure.**
+**Universal application compatibility platform, runtime orchestrator, and evidence-backed research infrastructure.**  
+*Engineered by Zyntrix Labs for Zyntrix OS and designed for default inclusion in top-tier Linux distributions (Fedora, Ubuntu, Debian, Arch Linux, openSUSE).*
 
 ---
 
@@ -14,7 +16,10 @@
 
 The **Zyntrix Compatibility Fabric (ZCF)** is an open-source, distribution-independent platform designed to coordinate existing compatibility technologies, investigate software execution behavior, diagnose incompatibilities, and distribute reproducible fixes throughout the Linux ecosystem.
 
-ZCF is **not** a replacement for Wine, Proton, QEMU, or Box64. Instead, it serves as the **unifying coordination and intelligence layer**:
+ZCF is **not** a replacement for Wine, Proton, QEMU, or Box64. Instead, it serves as the **unifying coordination, kernel integration, and intelligence layer**:
+- **Kernel `binfmt_misc` Integration:** Transparently runs Windows `.exe` and foreign architecture binaries directly from the shell or file manager via `/usr/bin/zcf-runner`.
+- **Freedesktop Desktop & MIME Integration:** XDG launcher (`.desktop`), MIME XML, and AppStream metadata compliant with GNOME Software and KDE Discover.
+- **Execution Engine (`zcf run`):** Seamless one-step execution coordinating prefix creation, Bubblewrap sandboxing, and automated headless virtual display (`xvfb`).
 - **Application Inspector:** Safely inspects PE, ELF, Mach-O, Android APKs, scripts, and archives without binary execution.
 - **Environment Inspector:** Discovers host OS, CPU ISA, GPU/Vulkan capabilities, and available compatibility runtimes.
 - **Compatibility Planner:** Evaluates multi-dimensional constraints (ISA, OS API, libraries, graphics) to provide explainable runtime recommendations with transparent confidence scoring.
@@ -22,7 +27,7 @@ ZCF is **not** a replacement for Wine, Proton, QEMU, or Box64. Instead, it serve
 - **Diagnostic & Remediation Engine:** Normalizes runtime error logs, detects failure signatures, and surfaces distribution-tailored fix instructions (Debian/Ubuntu, Arch, Fedora/RHEL, Alpine, openSUSE).
 - **Compatibility Research Workflow:** 11-step empirical investigation correlating REA static evidence with dynamic traces to formulate hypotheses and test workarounds.
 - **Sandboxing & Isolation:** Bubblewrap (`bwrap`) integration enforcing read-only system mounts, isolated network namespaces, and environment scrubbing.
-- **Compatibility Database & Sync:** Versioned, machine-readable repository of tested compatibility profiles and portable sync bundles.
+- **Manual Pages & Completions:** Complete groff user manual (`man zcf`) and tab-completion for Bash, Zsh, and Fish.
 - **REA Integration:** Integrated with [REA (Reverse Engineer Anything)](https://github.com/morluto/rea) via CLI and live Model Context Protocol (MCP) stdio connections for deep static and dynamic reverse engineering.
 
 ---
@@ -40,56 +45,73 @@ ZCF is **not** a replacement for Wine, Proton, QEMU, or Box64. Instead, it serve
 ZCF requires **Python 3.10+** and has zero mandatory third-party dependencies for core operations.
 
 ```bash
-# Set PYTHONPATH to src directory
+# Set PYTHONPATH to src directory (when running from source)
 export PYTHONPATH=src          # Linux / macOS
 $env:PYTHONPATH="src"          # Windows PowerShell
 ```
 
 ### 3.1 Unified Dashboard
 ```bash
-python -m zcf.cli.main dashboard
+zcf dashboard
 ```
 
-### 3.2 Host Environment Audit
+### 3.2 Seamless Application Execution (with sandboxing & auto-display)
 ```bash
-python -m zcf.cli.main env
+# Execute application through optimal runtime with Bubblewrap sandboxing
+zcf run path/to/application.exe
+
+# Force headless virtual display (Xvfb) for servers and CI
+zcf run path/to/application.exe --headless
+
+# Transparent execution via binfmt_misc (once registered)
+./application.exe
 ```
 
-### 3.3 Inspect an Application
+### 3.3 Host Environment Audit
 ```bash
-python -m zcf.cli.main inspect path/to/app.exe
+zcf env
 ```
 
-### 3.4 Generate Compatibility Plan
+### 3.4 Inspect an Application
 ```bash
-python -m zcf.cli.main plan path/to/app.exe
+zcf inspect path/to/app.exe
 ```
 
-### 3.5 Controlled Execution Test
+### 3.5 Generate Compatibility Plan
 ```bash
-python -m zcf.cli.main test path/to/app.exe --dry-run
+zcf plan path/to/app.exe
 ```
 
-### 3.6 Diagnose Runtime Failure Logs & Synthesize Fixes
+### 3.6 Controlled Execution Test
 ```bash
-python -m zcf.cli.main diag path/to/error.log --target path/to/app.exe
+zcf test path/to/app.exe --dry-run
 ```
 
-### 3.7 End-to-End Research Investigation
+### 3.7 Diagnose Runtime Failure Logs & Synthesize Fixes
 ```bash
-python -m zcf.cli.main research path/to/app.exe path/to/error.log
+zcf diag path/to/error.log --target path/to/app.exe
 ```
 
-### 3.8 Query & Sync Compatibility Knowledge Base
+### 3.8 End-to-End Research Investigation
+```bash
+zcf research path/to/app.exe path/to/error.log
+```
+
+### 3.9 Query & Sync Compatibility Knowledge Base
 ```bash
 # List all verified compatibility entries
-python -m zcf.cli.main db list
+zcf db list
 
 # Export portable evidence bundle
-python -m zcf.cli.main db export --output bundle.json
+zcf db export --output bundle.json
 
 # Import and reconcile external bundle
-python -m zcf.cli.main db import --file bundle.json
+zcf db import --file bundle.json
+```
+
+### 3.10 View Documentation Manual Page
+```bash
+man zcf
 ```
 
 ---
@@ -129,18 +151,23 @@ python -m unittest discover -s tests -v
 bash tests/run_tests.sh
 ```
 
-All **31 automated tests** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
+All **40 automated tests** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
 
 ---
 
 ## 7. Packaging & Distribution Specs
 
-Production package manifests are provided under `packaging/`:
-- **Debian / Ubuntu:** `packaging/debian/` (`control`, `rules`, `changelog`, `compat`)
+Production package manifests and staging scripts are provided under `packaging/` and `data/`:
+- **Debian / Ubuntu:** Package builder `packaging/build_distro_packages.sh` (produces `build/zcf_0.2.0-1_all.deb`) and `packaging/debian/`
 - **Arch Linux:** `packaging/arch/PKGBUILD`
 - **Red Hat / Fedora:** `packaging/rpm/zcf.spec`
 - **Flatpak:** `packaging/flatpak/org.zyntrix.zcf.json`
 - **AppImage:** `packaging/appimage/AppRun`
+- **Linux Kernel binfmt_misc:** `data/binfmt.d/zcf.conf`
+- **Desktop & MIME:** `data/desktop/` and `data/mime/`
+- **AppStream Metadata:** `data/metainfo/org.zyntrix.zcf.metainfo.xml`
+- **Shell Completions:** `data/completions/` (bash, zsh, fish)
+- **Systemd Units:** `data/systemd/`
 
 ---
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=ZCF binfmt_misc Kernel Compatibility Registration
+Documentation=man:zcf(1)
+DefaultDependencies=no
+After=systemd-binfmt.service
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/zcf service register-binfmt
+ExecStop=/usr/bin/zcf service unregister-binfmt
+
+[Install]
+WantedBy=sysinit.target

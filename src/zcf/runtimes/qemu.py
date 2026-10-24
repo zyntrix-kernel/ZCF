@@ -42,8 +42,8 @@ class QemuUserAdapter(RuntimeAdapterInterface):
 
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
-            if r.runtime_id == "runtime.qemu-user" and r.installed:
-                return True
+            if r.runtime_id == "runtime.qemu-user":
+                return r.installed
         return any(shutil.which(b) is not None for b in ARCH_QEMU_BINARY_MAP.values())
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:

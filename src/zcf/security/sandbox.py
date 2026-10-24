@@ -67,6 +67,9 @@ class SandboxManager:
 
         # Bind application working directory
         wrapped.extend(["--bind", working_dir, working_dir])
+        for extra_bind in pol.bind_mounts:
+            if os.path.exists(extra_bind):
+                wrapped.extend(["--bind", extra_bind, extra_bind])
         wrapped.extend(["--chdir", working_dir])
 
         # Target command

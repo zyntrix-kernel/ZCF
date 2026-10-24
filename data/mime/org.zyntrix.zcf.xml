@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-msdos-program">
+    <comment>Windows Executable (ZCF Managed)</comment>
+    <acronym>EXE</acronym>
+    <expanded-acronym>Executable File</expanded-acronym>
+    <generic-icon name="application-x-executable"/>
+    <magic priority="60">
+      <match type="string" value="MZ" offset="0"/>
+    </magic>
+    <glob pattern="*.exe"/>
+    <glob pattern="*.com"/>
+  </mime-type>
+  <mime-type type="application/x-msdownload">
+    <comment>Windows Installer / Library (ZCF Managed)</comment>
+    <generic-icon name="package-x-generic"/>
+    <glob pattern="*.msi"/>
+    <glob pattern="*.dll"/>
+  </mime-type>
+</mime-info>

@@ -32,8 +32,8 @@ class AndroidContainerAdapter(RuntimeAdapterInterface):
 
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
-            if r.runtime_id == "runtime.android" and r.installed:
-                return True
+            if r.runtime_id == "runtime.android":
+                return r.installed
         return shutil.which("waydroid") is not None
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:

@@ -33,8 +33,8 @@ class Box64Adapter(RuntimeAdapterInterface):
 
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
-            if r.runtime_id == "runtime.box64" and r.installed:
-                return True
+            if r.runtime_id == "runtime.box64":
+                return r.installed
         return shutil.which("box64") is not None
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:

@@ -1,0 +1,67 @@
+#compdef zcf zcf-runner
+
+_zcf() {
+    local -a commands
+    commands=(
+        'dashboard:Display the interactive system dashboard'
+        'run:Execute an application through optimal runtime with sandboxing'
+        'inspect:Inspect an application binary or script'
+        'env:Inspect host environment and runtimes'
+        'plan:Generate deterministic compatibility plan'
+        'test:Test application compatibility execution'
+        'diag:Analyze runtime failure log and synthesize fixes'
+        'research:Execute 11-step empirical reverse engineering workflow'
+        'db:Query or manage compatibility database'
+        'service:Manage ZCF binfmt and system integration'
+    )
+
+    _arguments -C \
+        '--version[Show version information]' \
+        '(-h --help)'{-h,--help}'[Show help message]' \
+        '1: :->command' \
+        '*:: :->args'
+
+    case $state in
+        command)
+            _describe -t commands 'zcf command' commands
+            ;;
+        args)
+            case $words[1] in
+                run)
+                    _arguments \
+                        '--sandbox[Enforce Bubblewrap sandboxing]' \
+                        '--no-sandbox[Disable sandboxing]' \
+                        '--headless[Force execution under virtual Xvfb display]' \
+                        '--install-deps[Automatically install missing package dependencies]' \
+                        '*:application binary:_files'
+                    ;;
+                inspect|plan|test)
+                    _arguments \
+                        '--json[Output JSON]' \
+                        '--dry-run[Perform dry run only]' \
+                        '*:target file:_files'
+                    ;;
+                diag)
+                    _arguments \
+                        '--target=[Optional target executable]:target file:_files' \
+                        '--json[Output JSON]' \
+                        '*:log file:_files'
+                    ;;
+                research)
+                    _arguments \
+                        '1:target binary:_files' \
+                        '2:log file:_files'
+                    ;;
+                db)
+                    _arguments \
+                        '1:(list show export import)' \
+                        '--id=[Entry ID]' \
+                        '--output=[Output file]:output file:_files' \
+                        '--file=[Input file]:input file:_files'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_zcf "$@"

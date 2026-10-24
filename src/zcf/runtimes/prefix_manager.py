@@ -73,3 +73,23 @@ class WinePrefixManager:
         self.kill_wineserver(prefix_path)
         if os.path.exists(prefix_path):
             shutil.rmtree(prefix_path, ignore_errors=True)
+
+    def cleanup_stale_prefixes(self, max_age_days: int = 30) -> int:
+        """Removes prefix directories older than max_age_days."""
+        import time
+        now = time.time()
+        cutoff = now - (max_age_days * 86400)
+        cleaned = 0
+        if not os.path.exists(self.base_dir):
+            return 0
+        for entry in os.listdir(self.base_dir):
+            full_path = os.path.join(self.base_dir, entry)
+            if os.path.isdir(full_path):
+                try:
+                    stat = os.stat(full_path)
+                    if stat.st_mtime < cutoff:
+                        self.cleanup_prefix(full_path)
+                        cleaned += 1
+                except Exception:
+                    pass
+        return cleaned

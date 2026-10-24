@@ -45,8 +45,8 @@ class ProtonAdapter(RuntimeAdapterInterface):
 
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
-            if r.runtime_id == "runtime.proton" and r.installed:
-                return True
+            if r.runtime_id == "runtime.proton":
+                return r.installed
         return self._find_proton_binary() is not None
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:

@@ -1,0 +1,7 @@
+[Unit]
+Description=ZCF Stale Runtime Prefix Maintenance
+Documentation=man:zcf(1)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/zcf service cleanup-prefixes --max-age-days 30

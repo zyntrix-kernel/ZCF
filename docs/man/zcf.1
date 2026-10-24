@@ -1,0 +1,64 @@
+.TH ZCF 1 "October 2026" "ZCF 0.2.0" "User Commands"
+.SH NAME
+zcf \- Zyntrix Compatibility Fabric universal runtime orchestrator and diagnostics engine
+.SH SYNOPSIS
+.B zcf
+[\fB\-\-version\fR] [\fB\-h\fR | \fB\-\-help\fR]
+.I COMMAND
+[\fIARGUMENTS\fR...]
+.SH DESCRIPTION
+.B zcf
+is an open-source, distribution-independent application compatibility platform.
+It inspects executable binaries (Windows PE, Linux ELF, macOS Mach-O, Android APK),
+evaluates hardware and operating system constraints, plans execution through optimal
+runtimes (Native, Wine, Proton, QEMU, Box64, Waydroid), applies security sandboxing,
+and diagnoses runtime failures with automated remediation recommendations.
+.SH COMMANDS
+.TP
+.B dashboard
+Displays the interactive terminal dashboard showing system architecture, detected runtimes, and database status.
+.TP
+.B run \fIPATH\fR [\fIARGS\fR...]
+Executes an application through its optimal planned runtime, ensuring prefix isolation, sandboxing, and automated crash diagnostics.
+.TP
+.B inspect \fIPATH\fR [\fB\-\-json\fR]
+Performs non-executing static analysis of a binary or script, extracting architecture, subsystem, imports, and Authenticode signatures.
+.TP
+.B env [\fB\-\-json\fR]
+Audits the host environment and detects installed compatibility runtimes.
+.TP
+.B plan \fIPATH\fR [\fB\-\-json\fR]
+Generates a deterministic compatibility plan with explainable confidence scoring.
+.TP
+.B test \fIPATH\fR [\fB\-\-dry-run\fR]
+Validates execution capability in an isolated test harness without affecting host files.
+.TP
+.B diag \fILOG_PATH\fR [\fB\-\-target\fR \fIPATH\fR] [\fB\-\-json\fR]
+Analyzes execution failure logs against 14 known failure signatures and synthesizes distribution-tailored fix commands.
+.TP
+.B research \fIBINARY_PATH\fR \fILOG_PATH\fR
+Executes the 11-step empirical reverse-engineering and hypothesis verification workflow.
+.TP
+.B db \fIaction\fR [\fIOPTIONS\fR]
+Manages the compatibility knowledge base. Actions include \fBlist\fR, \fBshow\fR, \fBexport\fR, and \fBimport\fR.
+.SH ENVIRONMENT VARIABLES
+.TP
+.B ZCF_PREFIX_DIR
+Overrides the root directory for managed runtime prefixes (default: \fI~/.local/share/zcf/prefixes\fR).
+.TP
+.B ZCF_SANDBOX
+Controls Bubblewrap sandboxing. Set to \fB0\fR or \fBoff\fR to disable sandboxing.
+.TP
+.B ZCF_HEADLESS
+Forces execution inside an automated virtual framebuffer (\fBxvfb\fR) even if a physical display is available.
+.SH FILES
+.TP
+.I /usr/lib/binfmt.d/zcf.conf
+Systemd binfmt_misc kernel registration for transparent binary execution.
+.TP
+.I /usr/share/applications/org.zyntrix.zcf.desktop
+Freedesktop XDG application launcher.
+.SH AUTHORS
+Engineered by Zyntrix Labs for Zyntrix OS and the global Linux ecosystem.
+.SH LICENSE
+Apache License, Version 2.0.

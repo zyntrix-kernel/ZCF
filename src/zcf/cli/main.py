@@ -31,6 +31,43 @@ def format_header(title: str):
     print(f"=======================================================")
 
 
+def cmd_run(args):
+    from zcf.execution.runner import ExecutionOrchestrator
+    orchestrator = ExecutionOrchestrator()
+    try:
+        code = orchestrator.run(
+            artifact_path=args.artifact_path,
+            app_args=args.app_args,
+            use_sandbox=not args.no_sandbox,
+            force_headless=args.headless,
+            auto_install=args.install_deps,
+        )
+        sys.exit(code)
+    except Exception as e:
+        print(f"[ZCF Run Error] {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_service(args):
+    action = args.service_action
+    if action == "register-binfmt":
+        binfmt_rule = ":zcf-pe:M::MZ::/usr/bin/zcf-runner:PC"
+        register_path = "/proc/sys/fs/binfmt_misc/register"
+        if os.path.exists(register_path):
+            try:
+                with open(register_path, "w") as f:
+                    f.write(binfmt_rule + "\n")
+                print("Registered ZCF binfmt_misc rules successfully.")
+            except Exception as e:
+                print(f"Failed to register binfmt: {e}", file=sys.stderr)
+        else:
+            print("binfmt_misc filesystem not mounted at /proc/sys/fs/binfmt_misc.", file=sys.stderr)
+    elif action == "cleanup-prefixes":
+        mgr = WinePrefixManager()
+        cleaned = mgr.cleanup_stale_prefixes(max_age_days=args.max_age_days)
+        print(f"Cleaned {cleaned} stale prefix directories.")
+
+
 def cmd_inspect(args):
     inspector = ApplicationInspector()
     try:
@@ -310,6 +347,21 @@ def main(argv: Optional[List[str]] = None):
     # dashboard
     p_dash = subparsers.add_parser("dashboard", help="Show system dashboard and compatibility status")
     p_dash.set_defaults(func=cmd_dashboard)
+
+    # run
+    p_run = subparsers.add_parser("run", help="Execute application through optimal runtime with sandboxing")
+    p_run.add_argument("artifact_path", help="Path to executable binary")
+    p_run.add_argument("app_args", nargs="*", help="Arguments to pass to target application")
+    p_run.add_argument("--no-sandbox", action="store_true", help="Disable Bubblewrap container isolation")
+    p_run.add_argument("--headless", action="store_true", help="Force virtual Xvfb display server")
+    p_run.add_argument("--install-deps", action="store_true", help="Automatically install missing dependencies")
+    p_run.set_defaults(func=cmd_run)
+
+    # service
+    p_svc = subparsers.add_parser("service", help="Manage system integration and background maintenance")
+    p_svc.add_argument("service_action", choices=["register-binfmt", "unregister-binfmt", "cleanup-prefixes"], help="Action to perform")
+    p_svc.add_argument("--max-age-days", type=int, default=30, help="Max prefix age in days for cleanup")
+    p_svc.set_defaults(func=cmd_service)
 
     # inspect
     p_inspect = subparsers.add_parser("inspect", help="Inspect an application binary or script")
