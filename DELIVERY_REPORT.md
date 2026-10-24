@@ -25,7 +25,8 @@ ZCF is a distribution-independent, open-source application compatibility platfor
 6. **Shell Autocompletion:** Native tab-completion scripts for Bash, Zsh, and Fish shells (`data/completions/`).
 7. **Distribution Manual Pages:** Full groff/roff manual page authored and installed (`docs/man/zcf.1`).
 8. **Native Package Distribution:** Tested build script (`packaging/build_distro_packages.sh`) producing verified Debian package (`build/zcf_0.2.0-1_all.deb`), installed and tested via `dpkg -i` on Ubuntu 26.04 LTS.
-9. **Automated Test Suite:** 40 unit and integration tests across 15 test suites passing 100% across both Windows 11 host and Ubuntu 26.04 Linux (`docs/TESTING.md`).
+9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), 1-click prefix disk cleaner, and 1-click Start Menu / App Grid integration (`zcf integrate`).
+10. **Automated Test Suite:** 47 unit and integration tests across 17 test suites passing 100% across both Windows 11 host and Ubuntu 26.04 Linux (`docs/TESTING.md`).
 
 ---
 
@@ -251,30 +252,36 @@ sudo dpkg -i build/zcf_0.2.0-1_all.deb
 sudo apt-get install -f -y # Resolve any optional recommends (wine, qemu-user, xvfb, bwrap)
 ```
 
-### 6.2 Primary Command-Line Usage
+### 6.2 Zero-Terminal GUI and Command-Line Usage
 ```bash
-# 1. System Dashboard
+# 1. Standalone GUI Control Center (for Beginners & Zero-Terminal Desktop)
+zcf-gui         # or 'zcf gui'
+
+# 2. Pin Any Windows/Foreign App into Linux Application Menu
+zcf integrate path/to/application.exe --name "My Windows App"
+
+# 3. System Dashboard (for Terminal Enthusiasts)
 zcf dashboard
 
-# 2. Seamless Application Execution (with sandboxing & auto-display)
+# 4. Seamless Application Execution (with sandboxing & auto-display)
 zcf run path/to/application.exe
 
-# 3. Transparent execution via binfmt_misc (or file manager click)
+# 5. Transparent execution via binfmt_misc (or file manager click)
 ./application.exe
 
-# 4. Binary Inspection
+# 6. Binary Inspection
 zcf inspect path/to/application.exe
 
-# 5. Compatibility Plan
+# 7. Compatibility Plan
 zcf plan path/to/application.exe
 
-# 6. Failure Diagnosis & Fix Synthesis
+# 8. Failure Diagnosis & Fix Synthesis
 zcf diag path/to/error.log --target path/to/application.exe
 
-# 7. Automated Empirical Research Workflow
+# 9. Automated Empirical Research Workflow
 zcf research path/to/application.exe path/to/error.log
 
-# 8. View Documentation Manual Page
+# 10. View Documentation Manual Page
 man zcf
 ```
 
@@ -284,11 +291,11 @@ man zcf
 
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS |
 | :--- | :--- | :--- |
-| **Total Test Files** | 15 | 15 |
-| **Total Test Cases** | 40 | 40 |
-| **Passing Tests** | 40 (100%) | 40 (100%) |
+| **Total Test Files** | 17 | 17 |
+| **Total Test Cases** | 47 | 47 |
+| **Passing Tests** | 47 (100%) | 47 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 4.449s | 7.595s |
+| **Execution Duration**| 4.724s | 6.120s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |
 
 ---

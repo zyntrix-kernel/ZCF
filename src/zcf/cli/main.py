@@ -31,6 +31,11 @@ def format_header(title: str):
     print(f"=======================================================")
 
 
+def cmd_gui(args):
+    from zcf.gui.app import launch_gui
+    launch_gui()
+
+
 def cmd_run(args):
     from zcf.execution.runner import ExecutionOrchestrator
     orchestrator = ExecutionOrchestrator()
@@ -358,6 +363,10 @@ def main(argv: Optional[List[str]] = None):
     # dashboard
     p_dash = subparsers.add_parser("dashboard", help="Show system dashboard and compatibility status")
     p_dash.set_defaults(func=cmd_dashboard)
+
+    # gui
+    p_gui = subparsers.add_parser("gui", help="Open the graphical ZCF Control Center")
+    p_gui.set_defaults(func=cmd_gui)
 
     # run
     p_run = subparsers.add_parser("run", help="Execute application through optimal runtime with sandboxing")

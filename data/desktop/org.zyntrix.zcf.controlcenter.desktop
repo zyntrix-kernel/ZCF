@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ZCF Control Center
+GenericName=Compatibility & Runtime Manager
+Comment=Manage Windows & foreign applications, install runtimes, and troubleshoot without terminal
+Exec=zcf-gui
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;Utility;Emulator;
+StartupNotify=true
+NoDisplay=false
+Keywords=Wine;Proton;Windows;Emulator;Compatibility;ZCF;

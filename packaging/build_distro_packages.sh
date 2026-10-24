@@ -50,6 +50,15 @@ if __name__ == "__main__":
 EOF
 chmod 755 "$BUILD_DIR/usr/bin/zcf-runner"
 
+cat << 'EOF' > "$BUILD_DIR/usr/bin/zcf-gui"
+#!/usr/bin/env python3
+import sys
+from zcf.gui.main import main
+if __name__ == "__main__":
+    main()
+EOF
+chmod 755 "$BUILD_DIR/usr/bin/zcf-gui"
+
 echo "[3/6] Installing binfmt_misc & Systemd Units..."
 cp "$ROOT_DIR/data/binfmt.d/zcf.conf" "$BUILD_DIR/usr/lib/binfmt.d/"
 cp "$ROOT_DIR/data/systemd/zcf-binfmt.service" "$BUILD_DIR/usr/lib/systemd/system/"
@@ -58,6 +67,7 @@ cp "$ROOT_DIR/data/systemd/zcf-prefix-cleaner.timer" "$BUILD_DIR/usr/lib/systemd
 
 echo "[4/6] Installing Freedesktop Desktop, MIME, and AppStream Metadata..."
 cp "$ROOT_DIR/data/desktop/org.zyntrix.zcf.desktop" "$BUILD_DIR/usr/share/applications/"
+cp "$ROOT_DIR/data/desktop/org.zyntrix.zcf.controlcenter.desktop" "$BUILD_DIR/usr/share/applications/"
 cp "$ROOT_DIR/data/mime/org.zyntrix.zcf.xml" "$BUILD_DIR/usr/share/mime/packages/"
 cp "$ROOT_DIR/data/metainfo/org.zyntrix.zcf.metainfo.xml" "$BUILD_DIR/usr/share/metainfo/"
 
@@ -93,6 +103,7 @@ EOF
 chmod -R u=rwX,go=rX "$DEB_DIR"
 chmod 755 "$DEB_DIR/usr/bin/zcf"
 chmod 755 "$DEB_DIR/usr/bin/zcf-runner"
+chmod 755 "$DEB_DIR/usr/bin/zcf-gui"
 chmod 755 "$DEB_DIR/DEBIAN"
 
 dpkg-deb --build "$DEB_DIR" "$ROOT_DIR/build/zcf_0.2.0-1_all.deb"

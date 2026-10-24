@@ -3,7 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: Cross-Distribution](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-green.svg)](#)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#)
-[![Tests: 44 Passed (100%)](https://img.shields.io/badge/Tests-44%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Tests: 47 Passed (100%)](https://img.shields.io/badge/Tests-47%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
 [![Release: v0.2.0 Distro-Grade](https://img.shields.io/badge/Release-v0.2.0%20Distro--Grade-blue.svg)](#)
 [![REA: 6.7.0 Verified](https://img.shields.io/badge/REA-6.7.0%20Verified-purple.svg)](docs/REA_SETUP.md)
 
@@ -50,12 +50,25 @@ export PYTHONPATH=src          # Linux / macOS
 $env:PYTHONPATH="src"          # Windows PowerShell
 ```
 
-### 3.1 Unified Dashboard
+### 3.1 Graphical Control Center (Zero-Terminal GUI for Beginners)
+Beginners can run advanced tasks without ever opening a terminal. Launch the standalone Control Center:
+```bash
+zcf gui         # or simply run 'zcf-gui' or click ZCF in your Linux Application Menu
+```
+The Control Center provides:
+- **Application Launcher:** Browse any `.exe`, `.msi`, `.apk` or binary, inspect recommended runtime with live confidence score, toggle sandboxing, and launch.
+- **One-Click Start Menu Integration:** Pin any Windows or foreign application into your Linux desktop launcher / application grid (`zcf integrate`).
+- **Engine Health & 1-Click Install:** View real-time status of Wine, Proton, QEMU, Box64, Waydroid, and Bubblewrap with 1-click graphical package installation.
+- **Windows Component Manager (Zero-Terminal Winetricks):** 1-click installation of Microsoft Visual C++ (2015-2022), DirectX End-User Runtimes (D3DX9/11), Wine Mono (.NET), and Vulkan DXVK.
+- **Storage & Prefix Cleaner:** Audit compatibility container disk usage and clean stale temporary prefixes with a single click.
+- **Automated Troubleshooter & REA:** Paste any error message to receive instant plain-language root-cause diagnosis and one-click remediation.
+
+### 3.2 Unified Terminal Dashboard (for Advanced Users)
 ```bash
 zcf dashboard
 ```
 
-### 3.2 Seamless Application Execution (with sandboxing & auto-display)
+### 3.3 Seamless Application Execution (with sandboxing & auto-display)
 ```bash
 # Execute application through optimal runtime with Bubblewrap sandboxing
 zcf run path/to/application.exe
@@ -65,6 +78,11 @@ zcf run path/to/application.exe --headless
 
 # Transparent execution via binfmt_misc (once registered)
 ./application.exe
+```
+
+### 3.4 Integrate Application into Linux Desktop Menu
+```bash
+zcf integrate path/to/application.exe --name "My Windows App"
 ```
 
 ### 3.3 Host Environment Audit
@@ -151,7 +169,7 @@ python -m unittest discover -s tests -v
 bash tests/run_tests.sh
 ```
 
-All **40 automated tests** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
+All **47 automated tests** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
 
 ---
 
