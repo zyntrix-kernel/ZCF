@@ -3,7 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: Cross-Distribution](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-green.svg)](#)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#)
-[![Tests: 40 Passed (100%)](https://img.shields.io/badge/Tests-40%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Tests: 44 Passed (100%)](https://img.shields.io/badge/Tests-44%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
 [![Release: v0.2.0 Distro-Grade](https://img.shields.io/badge/Release-v0.2.0%20Distro--Grade-blue.svg)](#)
 [![REA: 6.7.0 Verified](https://img.shields.io/badge/REA-6.7.0%20Verified-purple.svg)](docs/REA_SETUP.md)
 

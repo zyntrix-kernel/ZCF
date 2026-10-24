@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 from zcf.core.exceptions import ExecutionError, PlanningError
 from zcf.core.models import BinaryFormat, CompatibilityPlan, Subsystem
 from zcf.desktop.notifier import DesktopNotifier
+from zcf.desktop.ui import DesktopUI
 from zcf.diagnostics.analyzer import DiagnosticEngine
 from zcf.diagnostics.remediator import AutomatedRemediator
 from zcf.environment.inspector import EnvironmentInspector
@@ -40,6 +41,7 @@ class ExecutionOrchestrator:
         self.diagnostic_engine = DiagnosticEngine()
         self.remediator = AutomatedRemediator()
         self.notifier = DesktopNotifier()
+        self.desktop_ui = DesktopUI()
         self.installer_bridge = PackageInstallerBridge()
 
     def run(
@@ -75,6 +77,11 @@ class ExecutionOrchestrator:
         if not adapter.is_available(env):
             # Check if we can automatically install the missing runtime
             generic_target = "wine" if "wine" in plan.selected_runtime_id else "qemu-user"
+            if not auto_install and self.desktop_ui.is_gui_available():
+                cmd_str = " ".join(self.installer_bridge.get_install_command(generic_target) or [])
+                if self.desktop_ui.prompt_install_missing_runtime(app.file_name, adapter.get_name(), cmd_str):
+                    auto_install = True
+
             if auto_install:
                 installed = self.installer_bridge.install(generic_target, interactive=False)
                 if installed:
@@ -195,6 +202,9 @@ class ExecutionOrchestrator:
                     print(f"  [Package Install] {' && '.join(plan.package_install_commands)}")
                 if plan.action_items:
                     self.notifier.notify_failure(app.file_name, plan.action_items[0])
+                    if self.desktop_ui.is_gui_available():
+                        pkg_cmd = " && ".join(plan.package_install_commands) if plan.package_install_commands else None
+                        self.desktop_ui.show_troubleshooting_wizard(app.file_name, plan.action_items[0], plan.action_items[0], pkg_cmd)
             else:
                 print(f"\n[ZCF Runner] Process exited with status {exit_code}.")
 

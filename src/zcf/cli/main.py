@@ -68,6 +68,17 @@ def cmd_service(args):
         print(f"Cleaned {cleaned} stale prefix directories.")
 
 
+def cmd_integrate(args):
+    from zcf.desktop.integrator import DesktopIntegrator
+    integrator = DesktopIntegrator()
+    try:
+        path = integrator.integrate(args.artifact_path, custom_name=args.name)
+        print(f"Successfully integrated application into desktop menu: {path}")
+    except Exception as e:
+        print(f"[ZCF Integration Error] {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_inspect(args):
     inspector = ApplicationInspector()
     try:
@@ -356,6 +367,12 @@ def main(argv: Optional[List[str]] = None):
     p_run.add_argument("--headless", action="store_true", help="Force virtual Xvfb display server")
     p_run.add_argument("--install-deps", action="store_true", help="Automatically install missing dependencies")
     p_run.set_defaults(func=cmd_run)
+
+    # integrate
+    p_int = subparsers.add_parser("integrate", help="Add application to Linux desktop application menu")
+    p_int.add_argument("artifact_path", help="Path to application binary to integrate")
+    p_int.add_argument("--name", help="Custom display name in application menu")
+    p_int.set_defaults(func=cmd_integrate)
 
     # service
     p_svc = subparsers.add_parser("service", help="Manage system integration and background maintenance")
