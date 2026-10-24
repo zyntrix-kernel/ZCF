@@ -8,8 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from zcf.core.models import (
     ApplicationDescription,
@@ -18,11 +17,12 @@ from zcf.core.models import (
     EnvironmentReport,
     ExecutionResult,
     ValidationResult,
+    WorkloadType,
 )
-from zcf.runtimes.base import RuntimeAdapterInterface
+from zcf.runtimes.base import BaseRuntimeAdapter
 
 
-class Box64Adapter(RuntimeAdapterInterface):
+class Box64Adapter(BaseRuntimeAdapter):
     """Adapter for running x86_64 Linux executables on ARM64 Linux hosts."""
 
     def get_id(self) -> str:
@@ -31,11 +31,48 @@ class Box64Adapter(RuntimeAdapterInterface):
     def get_name(self) -> str:
         return "Box64 Dynamic x86_64 Emulator"
 
+    def get_version(self, env: Optional[EnvironmentReport] = None) -> Optional[str]:
+        if env:
+            for r in env.available_runtimes:
+                if r.runtime_id == "runtime.box64" and r.version:
+                    return r.version
+
+        box_bin = shutil.which("box64")
+        if box_bin:
+            try:
+                out = subprocess.check_output([box_bin, "-v"], text=True, timeout=5).strip()
+                return out
+            except Exception:
+                pass
+        return None
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        return {
+            "supported_formats": [BinaryFormat.ELF.value],
+            "supported_architectures": [Architecture.X86_64.value],
+            "supported_workloads": [WorkloadType.DESKTOP_GUI.value, WorkloadType.GAME.value, WorkloadType.CLI_TOOL.value],
+            "requires_vulkan": False,
+            "requires_wayland": False,
+            "supports_sandboxing": True,
+            "supports_virtual_display": True,
+            "isolation_features": ["dynarec", "library_wrapping", "bubblewrap"],
+            "known_limitations": [
+                "Only translates x86_64 binaries (32-bit x86 requires box86).",
+                "Optimized specifically for ARM64 CPU architectures.",
+            ],
+        }
+
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
             if r.runtime_id == "runtime.box64":
                 return r.installed
         return shutil.which("box64") is not None
+
+    def check_prerequisites(self, app: ApplicationDescription, env: EnvironmentReport) -> List[str]:
+        missing: List[str] = []
+        if not self.is_available(env):
+            missing.append("Box64 dynamic translator binary ('box64') is not installed.")
+        return missing
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:
         errors: List[str] = []
@@ -71,8 +108,15 @@ class Box64Adapter(RuntimeAdapterInterface):
         return {
             "box64_binary": shutil.which("box64") or "box64",
             "environment_variables": env_vars,
-            "working_directory": os.path.dirname(app.artifact_path),
+            "working_directory": os.path.dirname(os.path.abspath(app.artifact_path)),
         }
+
+    def build_command(
+        self, app: ApplicationDescription, context: Dict[str, Any], args: Optional[List[str]] = None
+    ) -> List[str]:
+        box_bin = context.get("box64_binary") or shutil.which("box64") or "box64"
+        abs_target = os.path.abspath(app.artifact_path)
+        return [box_bin, abs_target] + (args or [])
 
     def execute(
         self,
@@ -80,45 +124,14 @@ class Box64Adapter(RuntimeAdapterInterface):
         context: Dict[str, Any],
         args: Optional[List[str]] = None,
         dry_run: bool = False,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        timeout: Optional[int] = None,
     ) -> ExecutionResult:
-        box_bin = context.get("box64_binary", "box64")
-        cmd = [box_bin, app.artifact_path] + (args or [])
-
-        if dry_run:
-            return ExecutionResult(
-                success=True,
-                exit_code=0,
-                stdout=f"[Dry Run] Prepared Box64 execution:\nCommand: {' '.join(cmd)}",
-                stderr="",
-                execution_time_seconds=0.0,
-                command=cmd,
-            )
-
-        start_time = time.time()
-        try:
-            res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=context.get("working_directory"),
-                env=context.get("environment_variables"),
-                timeout=15,
-            )
-            elapsed = time.time() - start_time
-            return ExecutionResult(
-                success=res.returncode == 0,
-                exit_code=res.returncode,
-                stdout=res.stdout,
-                stderr=res.stderr,
-                execution_time_seconds=elapsed,
-                command=cmd,
-            )
-        except Exception as e:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
-                execution_time_seconds=time.time() - start_time,
-                command=cmd,
-            )
+        cmd = self.build_command(app, context, args)
+        return self._execute_process(
+            cmd=cmd,
+            context=context,
+            dry_run=dry_run,
+            stream_callback=stream_callback,
+            timeout=timeout,
+        )

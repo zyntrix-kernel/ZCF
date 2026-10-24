@@ -8,19 +8,19 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from zcf.core.models import (
     ApplicationDescription,
+    Architecture,
     BinaryFormat,
     EnvironmentReport,
     ExecutionResult,
     ValidationResult,
+    WorkloadType,
 )
-from zcf.runtimes.base import RuntimeAdapterInterface
+from zcf.runtimes.base import BaseRuntimeAdapter
 from zcf.runtimes.prefix_manager import WinePrefixManager
-
 
 PROTON_SEARCH_PATHS = [
     os.path.expanduser("~/.steam/root/compatibilitytools.d"),
@@ -31,7 +31,7 @@ PROTON_SEARCH_PATHS = [
 ]
 
 
-class ProtonAdapter(RuntimeAdapterInterface):
+class ProtonAdapter(BaseRuntimeAdapter):
     """Adapter for running Windows gaming and high-performance applications via Proton."""
 
     def __init__(self, prefix_manager: Optional[WinePrefixManager] = None):
@@ -43,11 +43,69 @@ class ProtonAdapter(RuntimeAdapterInterface):
     def get_name(self) -> str:
         return "Valve Proton Gaming Runtime"
 
+    def get_version(self, env: Optional[EnvironmentReport] = None) -> Optional[str]:
+        if env:
+            for r in env.available_runtimes:
+                if r.runtime_id == "runtime.proton" and r.version:
+                    return r.version
+
+        proton_bin = self._find_proton_binary()
+        if proton_bin:
+            version_file = os.path.join(os.path.dirname(proton_bin), "version")
+            if os.path.exists(version_file):
+                try:
+                    with open(version_file, "r", encoding="utf-8") as f:
+                        return f.read().strip()
+                except Exception:
+                    pass
+            return os.path.basename(os.path.dirname(proton_bin))
+        return None
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        return {
+            "supported_formats": [BinaryFormat.PE.value],
+            "supported_architectures": [Architecture.X86_64.value, Architecture.I386.value],
+            "supported_workloads": [WorkloadType.GAME.value, WorkloadType.DESKTOP_GUI.value],
+            "requires_vulkan": True,
+            "requires_wayland": False,
+            "supports_sandboxing": True,
+            "supports_virtual_display": True,
+            "isolation_features": ["steam_compat_data", "dxvk", "bubblewrap"],
+            "known_limitations": [
+                "Requires Vulkan 1.3 host driver for optimal DXVK translation.",
+                "Steam-dependent DRM may require Steam runtime environment.",
+            ],
+        }
+
+    def _find_proton_binary(self) -> Optional[str]:
+        # 1. PATH lookup
+        on_path = shutil.which("proton")
+        if on_path:
+            return on_path
+
+        # 2. Known Steam directories
+        for base_path in PROTON_SEARCH_PATHS:
+            if not os.path.exists(base_path):
+                continue
+            for entry in os.listdir(base_path):
+                candidate = os.path.join(base_path, entry, "proton")
+                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                    return candidate
+        return None
+
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
             if r.runtime_id == "runtime.proton":
                 return r.installed
         return self._find_proton_binary() is not None
+
+    def check_prerequisites(self, app: ApplicationDescription, env: EnvironmentReport) -> List[str]:
+        missing: List[str] = []
+        if not self._find_proton_binary():
+            missing.append("Proton runner script not found in Steam compatibility directories.")
+        if not env.graphics_capabilities.get("vulkan_supported", False):
+            missing.append("Vulkan driver not detected; required for DXVK translation layer.")
+        return missing
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:
         errors: List[str] = []
@@ -76,7 +134,7 @@ class ProtonAdapter(RuntimeAdapterInterface):
         env_vars = os.environ.copy()
         env_vars["STEAM_COMPAT_DATA_PATH"] = prefix_path
         env_vars["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.path.expanduser("~/.steam/root")
-        env_vars["PROTON_USE_WINED3D"] = "0" if config and config.get("use_dxvk", True) else "1"
+        env_vars["PROTON_USE_WINED3D"] = "0" if (config is None or config.get("use_dxvk", True)) else "1"
 
         if config and "environment_variables" in config:
             env_vars.update(config["environment_variables"])
@@ -85,8 +143,15 @@ class ProtonAdapter(RuntimeAdapterInterface):
             "proton_binary": self._find_proton_binary() or "proton",
             "prefix_path": prefix_path,
             "environment_variables": env_vars,
-            "working_directory": os.path.dirname(app.artifact_path),
+            "working_directory": os.path.dirname(os.path.abspath(app.artifact_path)),
         }
+
+    def build_command(
+        self, app: ApplicationDescription, context: Dict[str, Any], args: Optional[List[str]] = None
+    ) -> List[str]:
+        proton_bin = context.get("proton_binary") or self._find_proton_binary() or "proton"
+        abs_target = os.path.abspath(app.artifact_path)
+        return [proton_bin, "run", abs_target] + (args or [])
 
     def execute(
         self,
@@ -94,64 +159,14 @@ class ProtonAdapter(RuntimeAdapterInterface):
         context: Dict[str, Any],
         args: Optional[List[str]] = None,
         dry_run: bool = False,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        timeout: Optional[int] = None,
     ) -> ExecutionResult:
-        proton_bin = context.get("proton_binary", "proton")
-        cmd = [proton_bin, "run", app.artifact_path] + (args or [])
-
-        if dry_run:
-            return ExecutionResult(
-                success=True,
-                exit_code=0,
-                stdout=f"[Dry Run] Prepared Proton environment at {context.get('prefix_path')}\nCommand: {' '.join(cmd)}",
-                stderr="",
-                execution_time_seconds=0.0,
-                command=cmd,
-                isolated_env_path=context.get("prefix_path"),
-            )
-
-        start_time = time.time()
-        try:
-            res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=context.get("working_directory"),
-                env=context.get("environment_variables"),
-                timeout=20,
-            )
-            elapsed = time.time() - start_time
-            return ExecutionResult(
-                success=res.returncode == 0,
-                exit_code=res.returncode,
-                stdout=res.stdout,
-                stderr=res.stderr,
-                execution_time_seconds=elapsed,
-                command=cmd,
-                isolated_env_path=context.get("prefix_path"),
-            )
-        except Exception as e:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
-                execution_time_seconds=time.time() - start_time,
-                command=cmd,
-                isolated_env_path=context.get("prefix_path"),
-            )
-
-    def _find_proton_binary(self) -> Optional[str]:
-        # Check PATH first
-        in_path = shutil.which("proton")
-        if in_path:
-            return in_path
-
-        # Scan Steam search directories
-        for base in PROTON_SEARCH_PATHS:
-            if os.path.exists(base):
-                for entry in os.listdir(base):
-                    if entry.lower().startswith("proton"):
-                        p_bin = os.path.join(base, entry, "proton")
-                        if os.path.exists(p_bin) and os.access(p_bin, os.X_OK):
-                            return p_bin
-        return None
+        cmd = self.build_command(app, context, args)
+        return self._execute_process(
+            cmd=cmd,
+            context=context,
+            dry_run=dry_run,
+            stream_callback=stream_callback,
+            timeout=timeout,
+        )

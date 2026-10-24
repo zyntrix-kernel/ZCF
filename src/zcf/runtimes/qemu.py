@@ -8,8 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from zcf.core.models import (
     ApplicationDescription,
@@ -18,9 +17,9 @@ from zcf.core.models import (
     EnvironmentReport,
     ExecutionResult,
     ValidationResult,
+    WorkloadType,
 )
-from zcf.runtimes.base import RuntimeAdapterInterface
-
+from zcf.runtimes.base import BaseRuntimeAdapter
 
 ARCH_QEMU_BINARY_MAP = {
     Architecture.ARM64: "qemu-aarch64",
@@ -30,8 +29,16 @@ ARCH_QEMU_BINARY_MAP = {
     Architecture.X86_64: "qemu-x86_64",
 }
 
+SYSROOT_MAP = {
+    Architecture.ARM64: "/usr/aarch64-linux-gnu",
+    Architecture.ARM: "/usr/arm-linux-gnueabihf",
+    Architecture.RISCV64: "/usr/riscv64-linux-gnu",
+    Architecture.I386: "/usr/i686-linux-gnu",
+    Architecture.X86_64: "/usr/x86_64-linux-gnu",
+}
 
-class QemuUserAdapter(RuntimeAdapterInterface):
+
+class QemuUserAdapter(BaseRuntimeAdapter):
     """Adapter for running cross-architecture Linux ELF executables."""
 
     def get_id(self) -> str:
@@ -40,11 +47,61 @@ class QemuUserAdapter(RuntimeAdapterInterface):
     def get_name(self) -> str:
         return "QEMU User-Mode Architecture Emulation"
 
+    def get_version(self, env: Optional[EnvironmentReport] = None) -> Optional[str]:
+        if env:
+            for r in env.available_runtimes:
+                if r.runtime_id == "runtime.qemu-user" and r.version:
+                    return r.version
+
+        for b in ARCH_QEMU_BINARY_MAP.values():
+            bin_path = shutil.which(b) or shutil.which(f"{b}-static")
+            if bin_path:
+                try:
+                    out = subprocess.check_output([bin_path, "--version"], text=True, timeout=5)
+                    first_line = out.splitlines()[0] if out else ""
+                    return first_line.split("version")[-1].strip() if "version" in first_line else first_line
+                except Exception:
+                    pass
+        return None
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        return {
+            "supported_formats": [BinaryFormat.ELF.value],
+            "supported_architectures": [
+                Architecture.ARM64.value,
+                Architecture.ARM.value,
+                Architecture.RISCV64.value,
+                Architecture.I386.value,
+                Architecture.X86_64.value,
+            ],
+            "supported_workloads": [WorkloadType.CLI_TOOL.value, WorkloadType.DESKTOP_GUI.value],
+            "requires_vulkan": False,
+            "requires_wayland": False,
+            "supports_sandboxing": True,
+            "supports_virtual_display": True,
+            "isolation_features": ["sysroot", "bubblewrap"],
+            "known_limitations": [
+                "Target dynamically-linked ELF binaries require multiarch sysroot libraries installed on host.",
+            ],
+        }
+
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
             if r.runtime_id == "runtime.qemu-user":
                 return r.installed
-        return any(shutil.which(b) is not None for b in ARCH_QEMU_BINARY_MAP.values())
+        return any(
+            shutil.which(b) is not None or shutil.which(f"{b}-static") is not None
+            for b in ARCH_QEMU_BINARY_MAP.values()
+        )
+
+    def check_prerequisites(self, app: ApplicationDescription, env: EnvironmentReport) -> List[str]:
+        missing: List[str] = []
+        qemu_bin = ARCH_QEMU_BINARY_MAP.get(app.architecture)
+        if qemu_bin:
+            resolved = shutil.which(qemu_bin) or shutil.which(f"{qemu_bin}-static")
+            if not resolved:
+                missing.append(f"QEMU user emulator for {app.architecture.value} ('{qemu_bin}') is not installed.")
+        return missing
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:
         errors: List[str] = []
@@ -79,20 +136,32 @@ class QemuUserAdapter(RuntimeAdapterInterface):
         resolved_bin = shutil.which(qemu_bin) or shutil.which(f"{qemu_bin}-static") or qemu_bin
 
         # Default multiarch sysroot if available
-        sysroot = None
-        if app.architecture == Architecture.ARM64:
-            if os.path.exists("/usr/aarch64-linux-gnu"):
-                sysroot = "/usr/aarch64-linux-gnu"
-        elif app.architecture == Architecture.ARM:
-            if os.path.exists("/usr/arm-linux-gnueabihf"):
-                sysroot = "/usr/arm-linux-gnueabihf"
+        sysroot = SYSROOT_MAP.get(app.architecture)
+        if sysroot and not os.path.exists(sysroot):
+            sysroot = None
+
+        if config and "environment_variables" in config:
+            env_vars.update(config["environment_variables"])
 
         return {
             "qemu_binary": resolved_bin,
             "sysroot": sysroot,
             "environment_variables": env_vars,
-            "working_directory": os.path.dirname(app.artifact_path),
+            "working_directory": os.path.dirname(os.path.abspath(app.artifact_path)),
         }
+
+    def build_command(
+        self, app: ApplicationDescription, context: Dict[str, Any], args: Optional[List[str]] = None
+    ) -> List[str]:
+        qemu_bin = context.get("qemu_binary") or ARCH_QEMU_BINARY_MAP.get(app.architecture, "qemu-aarch64")
+        abs_target = os.path.abspath(app.artifact_path)
+        app_args = args or []
+
+        sysroot = context.get("sysroot")
+        if sysroot and os.path.exists(sysroot):
+            return [qemu_bin, "-L", sysroot, abs_target] + app_args
+
+        return [qemu_bin, abs_target] + app_args
 
     def execute(
         self,
@@ -100,59 +169,14 @@ class QemuUserAdapter(RuntimeAdapterInterface):
         context: Dict[str, Any],
         args: Optional[List[str]] = None,
         dry_run: bool = False,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        timeout: Optional[int] = None,
     ) -> ExecutionResult:
-        qemu_bin = context.get("qemu_binary", "qemu-aarch64")
-        cmd = [qemu_bin]
-        if context.get("sysroot"):
-            cmd.extend(["-L", context["sysroot"]])
-        cmd.append(app.artifact_path)
-        if args:
-            cmd.extend(args)
-
-        if dry_run:
-            return ExecutionResult(
-                success=True,
-                exit_code=0,
-                stdout=f"[Dry Run] QEMU User plan verified:\nCommand: {' '.join(cmd)}",
-                stderr="",
-                execution_time_seconds=0.0,
-                command=cmd,
-            )
-
-        start_time = time.time()
-        try:
-            res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=context.get("working_directory"),
-                env=context.get("environment_variables"),
-                timeout=10,
-            )
-            elapsed = time.time() - start_time
-            return ExecutionResult(
-                success=res.returncode == 0,
-                exit_code=res.returncode,
-                stdout=res.stdout,
-                stderr=res.stderr,
-                execution_time_seconds=elapsed,
-                command=cmd,
-            )
-        except subprocess.TimeoutExpired:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr="QEMU execution timed out after 10 seconds",
-                execution_time_seconds=10.0,
-                command=cmd,
-            )
-        except Exception as e:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
-                execution_time_seconds=time.time() - start_time,
-                command=cmd,
-            )
+        cmd = self.build_command(app, context, args)
+        return self._execute_process(
+            cmd=cmd,
+            context=context,
+            dry_run=dry_run,
+            stream_callback=stream_callback,
+            timeout=timeout,
+        )

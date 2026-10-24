@@ -38,6 +38,15 @@ class Subsystem(str, Enum):
     UNKNOWN = "unknown"
 
 
+class WorkloadType(str, Enum):
+    DESKTOP_GUI = "desktop_gui"
+    CLI_TOOL = "cli_tool"
+    GAME = "game"
+    INSTALLER = "installer"
+    BACKGROUND_SERVICE = "background_service"
+    UNKNOWN = "unknown"
+
+
 class ExecutionMode(str, Enum):
     NATIVE = "native"
     TRANSLATION = "translation"
@@ -52,6 +61,21 @@ class CompatibilityStatus(str, Enum):
     PARTIALLY_COMPATIBLE = "partially_compatible"
     INCOMPATIBLE = "incompatible"
     UNTESTED = "untested"
+
+
+class ProvenanceTier(str, Enum):
+    DEMO_FIXTURE = "demo_fixture"
+    COMMUNITY_UNTESTED = "community_untested"
+    AUTOMATED_TEST = "automated_test"
+    MAINTAINER_VERIFIED = "maintainer_verified"
+
+
+class EvidenceStatus(str, Enum):
+    UNTESTED = "untested"
+    COMMUNITY_REPORTED = "community_reported"
+    REPRODUCED = "reproduced"
+    VERIFIED = "verified"
+    INCOMPATIBLE = "incompatible"
 
 
 class DisplayServer(str, Enum):
@@ -77,12 +101,16 @@ class ApplicationDescription:
     entry_point: Optional[str] = None
     security_indicators: Dict[str, bool] = field(default_factory=dict)
     limitations: List[str] = field(default_factory=list)
+    workload_type: WorkloadType = WorkloadType.UNKNOWN
+    is_installer: bool = False
+    installer_format: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["format"] = self.format.value
         d["architecture"] = self.architecture.value
         d["subsystem"] = self.subsystem.value
+        d["workload_type"] = self.workload_type.value
         return d
 
 
@@ -95,6 +123,7 @@ class RuntimeInfo:
     binary_path: Optional[str] = None
     supported_formats: List[str] = field(default_factory=list)
     supported_architectures: List[str] = field(default_factory=list)
+    capabilities: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -128,6 +157,10 @@ class CandidateEvaluation:
     eligible: bool
     score: float
     notes: str
+    blocked: bool = False
+    blocker_reasons: List[str] = field(default_factory=list)
+    prerequisites_met: bool = True
+    missing_prerequisites: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -142,9 +175,12 @@ class CompatibilityPlan:
     reasoning: str
     selected_runtime_name: Optional[str] = None
     execution_mode: ExecutionMode = ExecutionMode.BLOCKED
+    is_blocked: bool = False
+    blocker_summary: Optional[str] = None
     satisfied_requirements: List[str] = field(default_factory=list)
     missing_requirements: List[str] = field(default_factory=list)
     candidate_evaluations: List[CandidateEvaluation] = field(default_factory=list)
+    confidence_criteria: Dict[str, float] = field(default_factory=dict)
     recommended_configuration: Dict[str, Any] = field(default_factory=dict)
     safe_next_steps: List[str] = field(default_factory=list)
 
@@ -163,6 +199,24 @@ class ValidationResult:
 
 
 @dataclass
+class ExecutionSecurityPolicy:
+    workload_type: WorkloadType = WorkloadType.DESKTOP_GUI
+    isolate_network: bool = False
+    read_only_root: bool = True
+    disposable_tmp: bool = False
+    allow_root: bool = False
+    max_memory_mb: Optional[int] = None
+    max_cpu_seconds: Optional[int] = None
+    writable_paths: List[str] = field(default_factory=list)
+    environment_mode: str = "minimized_desktop"
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        d["workload_type"] = self.workload_type.value
+        return d
+
+
+@dataclass
 class ExecutionResult:
     success: bool
     exit_code: int
@@ -172,6 +226,10 @@ class ExecutionResult:
     command: List[str] = field(default_factory=list)
     isolated_env_path: Optional[str] = None
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
+    effective_runtime: Optional[str] = None
+    effective_security_policy: Dict[str, Any] = field(default_factory=dict)
+    permitted_writable_paths: List[str] = field(default_factory=list)
+    security_warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -192,8 +250,17 @@ class CompatibilityEntry:
     workarounds: List[Dict[str, Any]] = field(default_factory=list)
     diagnostic_signatures: List[str] = field(default_factory=list)
     provenance: Dict[str, Any] = field(default_factory=dict)
+    schema_version: str = "2.0"
+    provenance_tier: ProvenanceTier = ProvenanceTier.MAINTAINER_VERIFIED
+    evidence_status: EvidenceStatus = EvidenceStatus.VERIFIED
+    host_environment: Dict[str, Any] = field(default_factory=dict)
+    runtime_configuration: Dict[str, Any] = field(default_factory=dict)
+    test_procedure: str = ""
+    verification_history: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d["status"] = self.status.value
+        d["provenance_tier"] = self.provenance_tier.value
+        d["evidence_status"] = self.evidence_status.value
         return d

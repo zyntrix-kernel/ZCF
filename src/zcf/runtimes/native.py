@@ -6,9 +6,8 @@ Executes binaries and scripts matching the host operating system and CPU archite
 from __future__ import annotations
 
 import os
-import subprocess
-import time
-from typing import Any, Dict, List, Optional
+import shutil
+from typing import Any, Callable, Dict, List, Optional
 
 from zcf.core.models import (
     ApplicationDescription,
@@ -17,11 +16,12 @@ from zcf.core.models import (
     EnvironmentReport,
     ExecutionResult,
     ValidationResult,
+    WorkloadType,
 )
-from zcf.runtimes.base import RuntimeAdapterInterface
+from zcf.runtimes.base import BaseRuntimeAdapter
 
 
-class NativeAdapter(RuntimeAdapterInterface):
+class NativeAdapter(BaseRuntimeAdapter):
     """Adapter for native host execution."""
 
     def get_id(self) -> str:
@@ -29,6 +29,24 @@ class NativeAdapter(RuntimeAdapterInterface):
 
     def get_name(self) -> str:
         return "Native Host Runtime"
+
+    def get_version(self, env: Optional[EnvironmentReport] = None) -> Optional[str]:
+        if env:
+            return f"{env.os_name} {env.kernel_version} ({env.architecture})"
+        return "native-kernel"
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        return {
+            "supported_formats": [BinaryFormat.ELF.value, BinaryFormat.SCRIPT.value],
+            "supported_architectures": [Architecture.X86_64.value, Architecture.ARM64.value, Architecture.ALL.value],
+            "supported_workloads": [w.value for w in WorkloadType],
+            "requires_vulkan": False,
+            "requires_wayland": False,
+            "supports_sandboxing": True,
+            "supports_virtual_display": True,
+            "isolation_features": ["bubblewrap", "namespaces"],
+            "known_limitations": ["Host architecture must match target binary."],
+        }
 
     def is_available(self, env: EnvironmentReport) -> bool:
         return True
@@ -63,8 +81,25 @@ class NativeAdapter(RuntimeAdapterInterface):
             env_vars.update(config["environment_variables"])
         return {
             "environment_variables": env_vars,
-            "working_directory": os.path.dirname(app.artifact_path),
+            "working_directory": os.path.dirname(os.path.abspath(app.artifact_path)),
         }
+
+    def build_command(
+        self, app: ApplicationDescription, context: Dict[str, Any], args: Optional[List[str]] = None
+    ) -> List[str]:
+        target = os.path.abspath(app.artifact_path)
+        app_args = args or []
+
+        # Determine if script requires explicit interpreter
+        if app.format == BinaryFormat.SCRIPT:
+            if target.endswith(".py"):
+                interp = shutil.which("python3") or shutil.which("python") or "python3"
+                return [interp, target] + app_args
+            elif target.endswith(".sh"):
+                interp = shutil.which("bash") or shutil.which("sh") or "bash"
+                return [interp, target] + app_args
+
+        return [target] + app_args
 
     def execute(
         self,
@@ -72,53 +107,14 @@ class NativeAdapter(RuntimeAdapterInterface):
         context: Dict[str, Any],
         args: Optional[List[str]] = None,
         dry_run: bool = False,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        timeout: Optional[int] = None,
     ) -> ExecutionResult:
-        cmd = [app.artifact_path] + (args or [])
-        if dry_run:
-            return ExecutionResult(
-                success=True,
-                exit_code=0,
-                stdout="[Dry Run] Validated native command plan: " + " ".join(cmd),
-                stderr="",
-                execution_time_seconds=0.0,
-                command=cmd,
-                isolated_env_path=None,
-            )
-
-        start_time = time.time()
-        try:
-            res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=context.get("working_directory"),
-                env=context.get("environment_variables"),
-                timeout=10,
-            )
-            elapsed = time.time() - start_time
-            return ExecutionResult(
-                success=res.returncode == 0,
-                exit_code=res.returncode,
-                stdout=res.stdout,
-                stderr=res.stderr,
-                execution_time_seconds=elapsed,
-                command=cmd,
-            )
-        except subprocess.TimeoutExpired:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr="Execution timed out after 10 seconds",
-                execution_time_seconds=10.0,
-                command=cmd,
-            )
-        except Exception as e:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
-                execution_time_seconds=time.time() - start_time,
-                command=cmd,
-            )
+        cmd = self.build_command(app, context, args)
+        return self._execute_process(
+            cmd=cmd,
+            context=context,
+            dry_run=dry_run,
+            stream_callback=stream_callback,
+            timeout=timeout,
+        )

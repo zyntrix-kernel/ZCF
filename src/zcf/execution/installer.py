@@ -1,6 +1,6 @@
 """
 Native Package Manager and PackageKit Bridge for ZCF.
-Enables transparent installation of missing compatibility runtimes and libraries.
+Enforces transparent installation of missing compatibility runtimes and libraries.
 """
 
 from __future__ import annotations
@@ -8,11 +8,12 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from typing import Dict, List, Optional
 
 
 class PackageInstallerBridge:
-    """Interfaces with host distribution package managers (PackageKit, apt, dnf, pacman)."""
+    """Interfaces with host distribution package managers (PackageKit, apt, dnf, pacman, zypper)."""
 
     PACKAGE_MAPPINGS: Dict[str, Dict[str, str]] = {
         "wine": {
@@ -51,6 +52,24 @@ class PackageInstallerBridge:
             "opensuse": "xorg-x11-server",
             "alpine": "xvfb",
         },
+        "winetricks": {
+            "debian": "winetricks",
+            "ubuntu": "winetricks",
+            "arch": "winetricks",
+            "fedora": "winetricks",
+            "rhel": "winetricks",
+            "opensuse": "winetricks",
+            "alpine": "winetricks",
+        },
+        "waydroid": {
+            "debian": "waydroid",
+            "ubuntu": "waydroid",
+            "arch": "waydroid",
+            "fedora": "waydroid",
+            "rhel": "waydroid",
+            "opensuse": "waydroid",
+            "alpine": "waydroid",
+        },
     }
 
     def __init__(self, distro: Optional[str] = None):
@@ -78,19 +97,22 @@ class PackageInstallerBridge:
         if shutil.which("pkcon"):
             return ["pkcon", "install", "-y"] + target_pkg.split()
 
+        # Check if Polkit graphical authorization (pkexec) should be preferred over headless sudo
+        auth_cmd = "pkexec" if (hasattr(sys.stdin, "isatty") and not sys.stdin.isatty() and shutil.which("pkexec")) else "sudo"
+
         # Match based on available package manager or target distribution
         if self.distro in ("arch", "manjaro") or (shutil.which("pacman") and not shutil.which("apt-get")):
-            return ["sudo", "pacman", "-S", "--noconfirm"] + target_pkg.split()
+            return [auth_cmd, "pacman", "-S", "--noconfirm"] + target_pkg.split()
         elif self.distro in ("fedora", "rhel", "centos") or shutil.which("dnf"):
-            return ["sudo", "dnf", "install", "-y"] + target_pkg.split()
+            return [auth_cmd, "dnf", "install", "-y"] + target_pkg.split()
         elif self.distro in ("opensuse", "suse") or shutil.which("zypper"):
-            return ["sudo", "zypper", "install", "-y"] + target_pkg.split()
+            return [auth_cmd, "zypper", "install", "-y"] + target_pkg.split()
         elif self.distro in ("alpine",) or shutil.which("apk"):
-            return ["sudo", "apk", "add"] + target_pkg.split()
+            return [auth_cmd, "apk", "add"] + target_pkg.split()
         elif shutil.which("apt-get") or self.distro in ("debian", "ubuntu"):
-            return ["sudo", "apt-get", "install", "-y"] + target_pkg.split()
+            return [auth_cmd, "apt-get", "install", "-y"] + target_pkg.split()
 
-        return ["sudo", "apt-get", "install", "-y"] + target_pkg.split()
+        return [auth_cmd, "apt-get", "install", "-y"] + target_pkg.split()
 
     def install(self, generic_target: str, interactive: bool = True) -> bool:
         """Executes the package installation command."""
@@ -107,7 +129,7 @@ class PackageInstallerBridge:
                 return False
 
         try:
-            res = subprocess.run(cmd, check=True)
+            res = subprocess.run(cmd, check=True, timeout=300)
             return res.returncode == 0
         except Exception as e:
             print(f"[ZCF] Installation failed: {e}")

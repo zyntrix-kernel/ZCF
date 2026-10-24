@@ -26,7 +26,8 @@ ZCF is a distribution-independent, open-source application compatibility platfor
 7. **Distribution Manual Pages:** Full groff/roff manual page authored and installed (`docs/man/zcf.1`).
 8. **Native Package Distribution:** Tested build script (`packaging/build_distro_packages.sh`) producing verified Debian package (`build/zcf_0.2.0-1_all.deb`), installed and tested via `dpkg -i` on Ubuntu 26.04 LTS.
 9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), 1-click prefix disk cleaner, and 1-click Start Menu / App Grid integration (`zcf integrate`).
-10. **Automated Test Suite:** 47 unit and integration tests across 17 test suites passing 100% across both Windows 11 host and Ubuntu 26.04 Linux (`docs/TESTING.md`).
+10. **Automated Test Suite:** 57 unit and integration tests across 20 test suites passing 100% across both Windows 11 host and Ubuntu 26.04 Linux (`docs/TESTING.md`).
+11. **Continuous Integration & Developer Guides:** GitHub Actions CI matrix workflow (`.github/workflows/ci.yml`), Runtime Adapter Authoring Guide (`docs/ADAPTER_AUTHORING.md`), Compatibility Profile Contribution Guidelines (`docs/CONTRIBUTING_PROFILES.md`), and Security Model Specification (`docs/SECURITY_MODEL.md`).
 
 ---
 
@@ -291,11 +292,11 @@ man zcf
 
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS |
 | :--- | :--- | :--- |
-| **Total Test Files** | 17 | 17 |
-| **Total Test Cases** | 47 | 47 |
-| **Passing Tests** | 47 (100%) | 47 (100%) |
+| **Total Test Files** | 20 | 20 |
+| **Total Test Cases** | 57 | 57 |
+| **Passing Tests** | 57 (100%) | 57 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 4.724s | 6.120s |
+| **Execution Duration**| 6.368s | 10.994s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |
 
 ---

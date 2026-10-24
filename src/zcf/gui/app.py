@@ -2,7 +2,7 @@
 ZCF Desktop Control Center.
 Full-featured, zero-terminal graphical interface for Linux beginners.
 Enables application launching, one-click menu integration, runtime installation,
-prefix management, and automated crash diagnostics.
+component management, prefix maintenance, and automated crash diagnostics.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import subprocess
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from zcf import __version__
 from zcf.desktop.integrator import DesktopIntegrator
@@ -26,6 +26,7 @@ from zcf.execution.runner import ExecutionOrchestrator
 from zcf.gui.theme import DARK_THEME
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
+from zcf.runtimes.components import WindowsComponentManager
 from zcf.runtimes.prefix_manager import WinePrefixManager
 
 
@@ -35,8 +36,8 @@ class ZCFControlCenter:
     def __init__(self, root: Optional[tk.Tk] = None):
         self.root = root or tk.Tk()
         self.root.title(f"Zyntrix Compatibility Fabric Control Center (v{__version__})")
-        self.root.geometry("860x620")
-        self.root.minsize(780, 540)
+        self.root.geometry("920x660")
+        self.root.minsize(820, 560)
         self.root.configure(bg=DARK_THEME["bg"])
 
         # Core subsystems
@@ -45,12 +46,15 @@ class ZCFControlCenter:
         self.planner = CompatibilityPlanner()
         self.integrator = DesktopIntegrator()
         self.installer_bridge = PackageInstallerBridge()
+        self.component_mgr = WindowsComponentManager()
         self.diag_engine = DiagnosticEngine()
         self.remediator = AutomatedRemediator()
         self.prefix_mgr = WinePrefixManager()
         self.notifier = DesktopNotifier()
 
         self.current_app_path: Optional[str] = None
+        self.current_plan: Optional[Any] = None
+        self.last_remediation_commands: List[str] = []
         self.env_report = self.env_inspector.inspect()
 
         self._configure_styles()
@@ -122,60 +126,59 @@ class ZCFControlCenter:
         style.configure(
             "Title.TLabel",
             background=DARK_THEME["card_bg"],
-            foreground=DARK_THEME["primary"],
+            foreground=DARK_THEME["fg"],
             font=("Segoe UI", 12, "bold"),
         )
 
-        # Buttons
         style.configure(
             "Primary.TButton",
             font=("Segoe UI", 10, "bold"),
-            background=DARK_THEME["primary"],
-            foreground=DARK_THEME["primary_fg"],
             padding=[12, 6],
+            background=DARK_THEME["primary"],
+            foreground="#FFFFFF",
+        )
+        style.configure(
+            "Secondary.TButton",
+            font=("Segoe UI", 9),
+            padding=[8, 4],
+            background=DARK_THEME["active_tab"],
+            foreground=DARK_THEME["fg"],
         )
         style.configure(
             "Success.TButton",
             font=("Segoe UI", 10, "bold"),
-            background=DARK_THEME["success"],
-            foreground=DARK_THEME["success_fg"],
             padding=[12, 6],
-        )
-        style.configure(
-            "Secondary.TButton",
-            font=("Segoe UI", 10),
-            background=DARK_THEME["card_bg"],
-            foreground=DARK_THEME["fg"],
-            padding=[10, 6],
+            background=DARK_THEME["accent_green"],
+            foreground="#FFFFFF",
         )
 
     def _build_header(self):
-        header_frame = ttk.Frame(self.root)
-        header_frame.pack(fill="x", padx=20, pady=(15, 10))
+        header_frame = ttk.Frame(self.root, padding="15 12 15 8")
+        header_frame.pack(fill="x")
 
-        title_lbl = ttk.Label(header_frame, text="ZYNTRIX COMPATIBILITY FABRIC", style="Header.TLabel")
-        title_lbl.pack(anchor="w")
+        title_lbl = ttk.Label(header_frame, text="⚡ ZCF Control Center", style="Header.TLabel")
+        title_lbl.pack(side="left")
 
-        sub_text = f"Platform: {self.env_report.os_name.capitalize()} ({self.env_report.architecture}) | Display: {self.env_report.display_server.value.upper()} | Kernel: {self.env_report.kernel_version[:30]}"
+        sub_text = f"Linux Application Compatibility Layer (v{__version__}) • Host: {self.env_report.os_name.title()} ({self.env_report.architecture})"
         sub_lbl = ttk.Label(header_frame, text=sub_text, style="SubHeader.TLabel")
-        sub_lbl.pack(anchor="w", pady=(2, 0))
+        sub_lbl.pack(side="right", pady=(4, 0))
 
     def _build_notebook(self):
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=(5, 15))
+        self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        # 5 Beginner-focused Tabs
+        # 5 Core Navigation Tabs
         self.tab_launch = ttk.Frame(self.notebook)
         self.tab_runtimes = ttk.Frame(self.notebook)
         self.tab_components = ttk.Frame(self.notebook)
         self.tab_prefixes = ttk.Frame(self.notebook)
         self.tab_diag = ttk.Frame(self.notebook)
 
-        self.notebook.add(self.tab_launch, text="🚀  Applications")
-        self.notebook.add(self.tab_runtimes, text="⚙️  Compatibility Engines")
-        self.notebook.add(self.tab_components, text="📦  Windows Components")
-        self.notebook.add(self.tab_prefixes, text="📂  Storage & Prefixes")
-        self.notebook.add(self.tab_diag, text="🛠️  Troubleshooter & REA")
+        self.notebook.add(self.tab_launch, text="  🚀 Quick Launcher  ")
+        self.notebook.add(self.tab_runtimes, text="  ⚙️ Engines & Health  ")
+        self.notebook.add(self.tab_components, text="  🧩 Windows Components  ")
+        self.notebook.add(self.tab_prefixes, text="  💾 Storage & Prefixes  ")
+        self.notebook.add(self.tab_diag, text="  🛠️ Troubleshooter & REA  ")
 
         self._build_launch_tab()
         self._build_runtimes_tab()
@@ -190,50 +193,73 @@ class ZCFControlCenter:
         card = ttk.Frame(self.tab_launch, style="Card.TFrame", padding=15)
         card.pack(fill="both", expand=True, padx=10, pady=10)
 
-        top_bar = ttk.Frame(card, style="Card.TFrame")
-        top_bar.pack(fill="x", pady=(0, 15))
+        # File Selection Row
+        lbl_file = ttk.Label(card, text="Select Windows or Foreign Application:", style="Title.TLabel")
+        lbl_file.pack(anchor="w", pady=(0, 6))
 
-        lbl = ttk.Label(top_bar, text="Select Application (Windows .EXE, Android .APK, or Linux binary):", style="Title.TLabel")
-        lbl.pack(anchor="w")
-
-        picker_frame = ttk.Frame(card, style="Card.TFrame")
-        picker_frame.pack(fill="x", pady=5)
+        file_box = ttk.Frame(card, style="Card.TFrame")
+        file_box.pack(fill="x", pady=(0, 12))
 
         self.entry_path = tk.Entry(
-            picker_frame,
+            file_box,
             bg=DARK_THEME["bg"],
             fg=DARK_THEME["fg"],
             insertbackground=DARK_THEME["fg"],
             relief="flat",
             font=("Segoe UI", 10),
         )
-        self.entry_path.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 10))
+        self.entry_path.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 8))
 
-        btn_browse = ttk.Button(picker_frame, text="Browse...", style="Secondary.TButton", command=self._on_browse_file)
+        btn_browse = ttk.Button(file_box, text="📁 Browse...", style="Secondary.TButton", command=self._on_browse_file)
         btn_browse.pack(side="right")
 
-        # Application Details Card
-        self.info_card = ttk.Frame(card, style="Card.TFrame", padding=10)
-        self.info_card.pack(fill="x", pady=15)
+        # Plan & Inspection Details Card
+        self.plan_box = ttk.Frame(card, style="Card.TFrame", padding=10)
+        self.plan_box.pack(fill="x", pady=8)
 
-        self.lbl_app_name = ttk.Label(self.info_card, text="No application selected", font=("Segoe UI", 12, "bold"))
+        self.lbl_app_name = ttk.Label(
+            self.plan_box,
+            text="No Application Selected",
+            font=("Segoe UI", 12, "bold"),
+            foreground=DARK_THEME["primary"],
+        )
         self.lbl_app_name.pack(anchor="w")
 
         self.lbl_app_details = ttk.Label(
-            self.info_card,
-            text="Select an executable above to automatically inspect architecture, subsystem, and compatibility plan.",
+            self.plan_box,
+            text="Select an executable (.exe, .msi, .apk, .elf, script) to inspect architecture, recommended runtime, and compatibility score.",
             style="SubHeader.TLabel",
         )
         self.lbl_app_details.pack(anchor="w", pady=(4, 0))
 
-        # Toggles
-        opt_frame = ttk.Frame(card, style="Card.TFrame")
-        opt_frame.pack(fill="x", pady=10)
+        # Candidate Runtimes Evaluation Tree
+        lbl_candidates = ttk.Label(card, text="Evaluated Compatibility Candidates:", font=("Segoe UI", 10, "bold"))
+        lbl_candidates.pack(anchor="w", pady=(10, 4))
+
+        self.tree_candidates = ttk.Treeview(
+            card,
+            columns=("engine", "eligible", "score", "notes"),
+            show="headings",
+            height=4,
+        )
+        self.tree_candidates.heading("engine", text="Engine")
+        self.tree_candidates.heading("eligible", text="Eligibility")
+        self.tree_candidates.heading("score", text="Confidence")
+        self.tree_candidates.heading("notes", text="Evaluation Notes")
+        self.tree_candidates.column("engine", width=160)
+        self.tree_candidates.column("eligible", width=90)
+        self.tree_candidates.column("score", width=90)
+        self.tree_candidates.column("notes", width=420)
+        self.tree_candidates.pack(fill="x", pady=(0, 10))
+
+        # Execution Options
+        opt_box = ttk.Frame(card, style="Card.TFrame")
+        opt_box.pack(fill="x", pady=6)
 
         self.var_sandbox = tk.BooleanVar(value=True)
-        cb_sandbox = tk.Checkbutton(
-            opt_frame,
-            text="Enable Bubblewrap Security Sandbox (protects host system)",
+        chk_sandbox = tk.Checkbutton(
+            opt_box,
+            text="Enable Bubblewrap Container Sandbox (Process Isolation)",
             variable=self.var_sandbox,
             bg=DARK_THEME["card_bg"],
             fg=DARK_THEME["fg"],
@@ -242,12 +268,12 @@ class ZCFControlCenter:
             activeforeground=DARK_THEME["fg"],
             font=("Segoe UI", 9),
         )
-        cb_sandbox.pack(anchor="w")
+        chk_sandbox.pack(anchor="w")
 
         self.var_headless = tk.BooleanVar(value=False)
-        cb_headless = tk.Checkbutton(
-            opt_frame,
-            text="Force Virtual Xvfb Display (for headless servers / testing)",
+        chk_headless = tk.Checkbutton(
+            opt_box,
+            text="Force Ephemeral Virtual Display (Xvfb Headless Server)",
             variable=self.var_headless,
             bg=DARK_THEME["card_bg"],
             fg=DARK_THEME["fg"],
@@ -256,11 +282,11 @@ class ZCFControlCenter:
             activeforeground=DARK_THEME["fg"],
             font=("Segoe UI", 9),
         )
-        cb_headless.pack(anchor="w")
+        chk_headless.pack(anchor="w")
 
         # Action Buttons
         btn_box = ttk.Frame(card, style="Card.TFrame")
-        btn_box.pack(fill="x", pady=(20, 0))
+        btn_box.pack(fill="x", pady=(15, 0))
 
         self.btn_run = ttk.Button(
             btn_box,
@@ -284,6 +310,7 @@ class ZCFControlCenter:
             filetypes=[
                 ("All Supported Binaries", "*.exe;*.msi;*.apk;*.sh;*"),
                 ("Windows Executables (*.exe)", "*.exe"),
+                ("Windows Installers (*.msi)", "*.msi"),
                 ("Android Packages (*.apk)", "*.apk"),
                 ("All Files", "*.*"),
             ],
@@ -298,14 +325,25 @@ class ZCFControlCenter:
         try:
             app = self.inspector.inspect(path)
             plan = self.planner.plan(app, self.env_report)
+            self.current_plan = plan
 
-            self.lbl_app_name.config(text=f"{app.file_name}")
+            self.lbl_app_name.config(text=f"{app.file_name} ({app.workload_type.value.upper()})")
             details = (
                 f"Format: {app.format.value.upper()} | Architecture: {app.architecture.value} | Subsystem: {app.subsystem.value.upper()}\n"
                 f"Planned Engine: {plan.selected_runtime_name or 'None'} (Confidence: {int(plan.confidence_score * 100)}%)\n"
-                f"Recommendation: {plan.reasoning}"
+                f"Rationale: {plan.reasoning}"
             )
             self.lbl_app_details.config(text=details)
+
+            # Update candidate evaluations treeview
+            for item in self.tree_candidates.get_children():
+                self.tree_candidates.delete(item)
+
+            for cand in plan.candidate_evaluations:
+                elig = "Yes" if cand.eligible else "No"
+                score_str = f"{int(cand.score * 100)}%"
+                self.tree_candidates.insert("", "end", values=(cand.runtime_id, elig, score_str, cand.notes))
+
         except Exception as e:
             self.lbl_app_name.config(text="Inspection Failed")
             self.lbl_app_details.config(text=str(e))
@@ -313,7 +351,7 @@ class ZCFControlCenter:
     def _on_run_app(self):
         path = self.entry_path.get().strip()
         if not path or not os.path.exists(path):
-            messagebox.showwarning("No File", "Please select a valid executable file first.")
+            self._show_warning("No File", "Please select a valid executable file first.")
             return
 
         def run_worker():
@@ -353,45 +391,68 @@ class ZCFControlCenter:
         card = ttk.Frame(self.tab_runtimes, style="Card.TFrame", padding=15)
         card.pack(fill="both", expand=True, padx=10, pady=10)
 
-        header = ttk.Label(card, text="Compatibility Engines & Drivers Status:", style="Title.TLabel")
+        header = ttk.Label(card, text="Compatibility Engines & Health Status:", style="Title.TLabel")
         header.pack(anchor="w", pady=(0, 10))
 
-        # Refresh button
         btn_refresh = ttk.Button(card, text="🔄  Refresh Status", style="Secondary.TButton", command=self._refresh_runtimes_ui)
         btn_refresh.pack(anchor="e", pady=(0, 10))
 
-        self.runtimes_list_frame = ttk.Frame(card, style="Card.TFrame")
-        self.runtimes_list_frame.pack(fill="both", expand=True)
+        self.runtimes_container = ttk.Frame(card, style="Card.TFrame")
+        self.runtimes_container.pack(fill="both", expand=True)
+
         self._populate_runtimes_list()
 
     def _populate_runtimes_list(self):
-        for widget in self.runtimes_list_frame.winfo_children():
+        for widget in self.runtimes_container.winfo_children():
             widget.destroy()
 
         self.env_report = self.env_inspector.inspect()
 
-        for runtime in self.env_report.available_runtimes:
-            row = ttk.Frame(self.runtimes_list_frame, style="Card.TFrame", padding=6)
+        runtimes = [
+            ("Wine Compatibility Layer", "wine", "Direct Win32/Win64 API Translation", "runtime.wine"),
+            ("Valve Proton Gaming Runtime", "proton", "DXVK Vulkan Gaming Translation", "runtime.proton"),
+            ("QEMU Architecture Emulation", "qemu-user", "AArch64 / ARM / RISC-V Userspace Emulation", "runtime.qemu-user"),
+            ("Box64 Dynamic Translator", "box64", "Optimized x86_64 Emulation on ARM64 Linux", "runtime.box64"),
+            ("Waydroid Android Container", "waydroid", "LXC Android Container for APK Applications", "runtime.android"),
+            ("Bubblewrap Process Sandbox", "bwrap", "Lightweight Userspace Security Container", "sandbox.bwrap"),
+        ]
+
+        for name, generic_pkg, desc, rid in runtimes:
+            row = ttk.Frame(self.runtimes_container, style="Card.TFrame", padding=6)
             row.pack(fill="x", pady=4)
 
-            icon = "✅" if runtime.installed else "❌"
-            status_text = f"{runtime.name}"
-            lbl_name = ttk.Label(row, text=f"{icon}  {status_text}", font=("Segoe UI", 10, "bold" if runtime.installed else "normal"))
-            lbl_name.pack(side="left")
+            # Check status
+            installed = False
+            version_str = ""
+            for r in self.env_report.available_runtimes:
+                if r.runtime_id == rid or generic_pkg in r.runtime_id:
+                    installed = r.installed
+                    version_str = r.version or ""
+                    break
+            if generic_pkg == "bwrap":
+                installed = shutil.which("bwrap") is not None
 
-            ver = f"({runtime.version[:35]})" if runtime.version else ("Ready" if runtime.installed else "Not Installed")
-            lbl_ver = ttk.Label(row, text=ver, style="SubHeader.TLabel")
-            lbl_ver.pack(side="left", padx=10)
+            status_icon = "🟢 Installed" if installed else "🔴 Missing"
+            status_color = DARK_THEME["accent_green"] if installed else DARK_THEME["accent_red"]
 
-            if not runtime.installed:
-                target_key = "wine" if "wine" in runtime.runtime_id else ("qemu-user" if "qemu" in runtime.runtime_id else runtime.name.lower())
+            lbl_info = ttk.Frame(row, style="Card.TFrame")
+            lbl_info.pack(side="left", fill="x", expand=True)
+
+            t_lbl = ttk.Label(lbl_info, text=f"{name}  [{status_icon}]", font=("Segoe UI", 10, "bold"))
+            t_lbl.pack(anchor="w")
+
+            sub_info = f"{desc} • Version: {version_str if version_str else 'N/A'}"
+            s_lbl = ttk.Label(lbl_info, text=sub_info, style="SubHeader.TLabel")
+            s_lbl.pack(anchor="w")
+
+            if not installed:
                 btn_install = ttk.Button(
                     row,
                     text="Install with 1-Click",
-                    style="Success.TButton",
-                    command=lambda t=target_key: self._on_install_runtime(t),
+                    style="Primary.TButton",
+                    command=lambda p=generic_pkg: self._on_install_runtime(p),
                 )
-                btn_install.pack(side="right")
+                btn_install.pack(side="right", padx=5)
 
     def _refresh_runtimes_ui(self):
         self._populate_runtimes_list()
@@ -435,34 +496,58 @@ class ZCFControlCenter:
         )
         desc.pack(anchor="w", pady=(0, 15))
 
-        components = [
-            ("Microsoft Visual C++ 2015-2022 Runtime", "vcrun2022", "Required by modern games and productivity software"),
-            ("Microsoft DirectX End-User Runtimes (D3DX9)", "d3dx9", "Required by legacy 3D games and graphics apps"),
-            ("Microsoft .NET Desktop Runtime (Wine Mono)", "mono", "Required by C# and .NET Windows applications"),
-            ("Vulkan DXVK Acceleration Layer", "dxvk", "Translates DirectX 9/10/11 to ultra-fast Vulkan"),
-        ]
-
-        for title, key, sub in components:
+        for comp in self.component_mgr.list_components():
             row = ttk.Frame(card, style="Card.TFrame", padding=8)
             row.pack(fill="x", pady=6)
 
             info_box = ttk.Frame(row, style="Card.TFrame")
             info_box.pack(side="left")
 
-            t_lbl = ttk.Label(info_box, text=title, font=("Segoe UI", 10, "bold"))
+            t_lbl = ttk.Label(info_box, text=comp.name, font=("Segoe UI", 10, "bold"))
             t_lbl.pack(anchor="w")
 
-            s_lbl = ttk.Label(info_box, text=sub, style="SubHeader.TLabel")
+            s_lbl = ttk.Label(info_box, text=comp.description, style="SubHeader.TLabel")
             s_lbl.pack(anchor="w")
 
-            btn = ttk.Button(row, text="Install Component", style="Primary.TButton", command=lambda k=key, t=title: self._on_install_component(k, t))
+            btn = ttk.Button(
+                row,
+                text="Install Component",
+                style="Primary.TButton",
+                command=lambda k=comp.key, n=comp.name: self._on_install_component(k, n),
+            )
             btn.pack(side="right")
 
     def _on_install_component(self, key: str, title: str):
-        self._show_info(
-            "Installing Component",
-            f"Configuring '{title}' inside managed compatibility prefixes...\nDone!",
-        )
+        # Determine prefix to install into
+        prefix_path = os.path.join(self.prefix_mgr.base_dir, "default")
+        if self.current_app_path:
+            try:
+                app = self.inspector.inspect(self.current_app_path)
+                prefix_path = self.prefix_mgr.get_prefix_path(app.sha256)
+            except Exception:
+                pass
+
+        def worker():
+            res = self.component_mgr.install(prefix_path, key)
+            if res.success:
+                self.root.after(
+                    0,
+                    lambda: self._show_info(
+                        "Component Installed",
+                        f"Successfully installed and verified '{title}' inside prefix:\n{prefix_path}",
+                    ),
+                )
+            else:
+                self.root.after(
+                    0,
+                    lambda: self._show_error(
+                        "Installation Failed",
+                        f"Could not install '{title}':\n{res.error}",
+                    ),
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._show_info("Installing", f"Configuring '{title}' inside compatibility prefix...\nThis may take a moment.")
 
     # =========================================================================
     # TAB 4: Storage & Prefix Manager
@@ -484,30 +569,79 @@ class ZCFControlCenter:
         self.lbl_prefix_stats = ttk.Label(card, text="Locating prefixes...", font=("Segoe UI", 10))
         self.lbl_prefix_stats.pack(anchor="w", pady=5)
 
-        btn_box = ttk.Frame(card, style="Card.TFrame")
-        btn_box.pack(fill="x", pady=15)
+        # Prefix treeview list
+        self.tree_prefixes = ttk.Treeview(
+            card,
+            columns=("name", "size", "arch", "locked", "path"),
+            show="headings",
+            height=6,
+        )
+        self.tree_prefixes.heading("name", text="Application / ID")
+        self.tree_prefixes.heading("size", text="Disk Size")
+        self.tree_prefixes.heading("arch", text="Architecture")
+        self.tree_prefixes.heading("locked", text="Active Lock")
+        self.tree_prefixes.heading("path", text="Filesystem Location")
+        self.tree_prefixes.column("name", width=180)
+        self.tree_prefixes.column("size", width=90)
+        self.tree_prefixes.column("arch", width=90)
+        self.tree_prefixes.column("locked", width=90)
+        self.tree_prefixes.column("path", width=300)
+        self.tree_prefixes.pack(fill="both", expand=True, pady=8)
 
-        btn_clean = ttk.Button(btn_box, text="🧹  Clean Stale Prefixes (Free Disk Space)", style="Primary.TButton", command=self._on_clean_prefixes)
+        btn_box = ttk.Frame(card, style="Card.TFrame")
+        btn_box.pack(fill="x", pady=10)
+
+        btn_clean = ttk.Button(
+            btn_box,
+            text="🧹  Clean Stale Prefixes (Free Disk Space)",
+            style="Primary.TButton",
+            command=self._on_clean_prefixes,
+        )
         btn_clean.pack(side="left", padx=(0, 10))
 
-        btn_open = ttk.Button(btn_box, text="📂  Open Prefix Folder in Files", style="Secondary.TButton", command=self._on_open_prefix_folder)
+        btn_open = ttk.Button(
+            btn_box,
+            text="📂  Open Prefix Folder in Files",
+            style="Secondary.TButton",
+            command=self._on_open_prefix_folder,
+        )
         btn_open.pack(side="left")
 
         self._refresh_prefix_stats()
 
     def _refresh_prefix_stats(self):
-        base = self.prefix_mgr.base_dir
-        if not os.path.exists(base):
-            self.lbl_prefix_stats.config(text=f"Prefix Root: {base} (0 active prefixes)")
-            return
+        prefixes = self.prefix_mgr.list_prefixes()
+        total_mb = sum(p.size_mb for p in prefixes)
+        self.lbl_prefix_stats.config(
+            text=f"Prefix Root: {self.prefix_mgr.base_dir}\nActive Isolated Prefixes: {len(prefixes)} • Total Storage: {round(total_mb, 2)} MB"
+        )
 
-        prefixes = [os.path.join(base, d) for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))]
-        self.lbl_prefix_stats.config(text=f"Prefix Root: {base}\nActive Isolated Prefixes: {len(prefixes)}")
+        for item in self.tree_prefixes.get_children():
+            self.tree_prefixes.delete(item)
+
+        for p in prefixes:
+            locked_str = "🔒 Active" if p.is_locked else "Ready"
+            self.tree_prefixes.insert("", "end", values=(p.app_name, f"{p.size_mb} MB", p.architecture, locked_str, p.prefix_path))
 
     def _on_clean_prefixes(self):
-        cleaned = self.prefix_mgr.cleanup_stale_prefixes(max_age_days=14)
-        self._show_info("Storage Maintenance", f"Cleaned {cleaned} stale temporary prefixes.")
-        self._refresh_prefix_stats()
+        preview = self.prefix_mgr.preview_cleanup(max_age_days=14, include_disposable_only=True)
+        count = len(preview["candidates"])
+        reclaim_mb = preview["total_reclaimable_mb"]
+
+        if count == 0:
+            self._show_info("Storage Clean", "No stale temporary prefixes found to clean.")
+            return
+
+        confirm = self._ask_yes_no(
+            "Confirm Storage Cleanup",
+            f"Found {count} stale prefix container(s) eligible for cleanup.\n\n"
+            f"Recoverable Disk Space: {reclaim_mb} MB\n\n"
+            f"Proceed with safe cleanup?",
+        )
+        if confirm:
+            cleaned = self.prefix_mgr.cleanup_stale_prefixes(max_age_days=14)
+            self._show_info("Storage Maintenance", f"Cleaned {cleaned} stale temporary prefixes ({reclaim_mb} MB freed).")
+            self._refresh_prefix_stats()
 
     def _on_open_prefix_folder(self):
         base = self.prefix_mgr.base_dir
@@ -524,7 +658,9 @@ class ZCFControlCenter:
         card = ttk.Frame(self.tab_diag, style="Card.TFrame", padding=15)
         card.pack(fill="both", expand=True, padx=10, pady=10)
 
-        header = ttk.Label(card, text="Automated Troubleshooter & REA Reverse Engineering:", style="Title.TLabel")
+        rea_active = shutil.which("rea") is not None
+        badge_text = "⚡ REA Reverse-Engineering Engine Active" if rea_active else "Standard Diagnostic Engine Active"
+        header = ttk.Label(card, text=f"Automated Troubleshooter ({badge_text}):", style="Title.TLabel")
         header.pack(anchor="w", pady=(0, 6))
 
         sub = ttk.Label(
@@ -536,7 +672,7 @@ class ZCFControlCenter:
 
         self.txt_log = tk.Text(
             card,
-            height=8,
+            height=7,
             bg=DARK_THEME["bg"],
             fg=DARK_THEME["fg"],
             insertbackground=DARK_THEME["fg"],
@@ -549,8 +685,19 @@ class ZCFControlCenter:
             "Sample: err:module:import_dll Library D3DX9_43.dll not found\nerror while loading shared libraries: libvulkan.so.1: cannot open shared object file",
         )
 
-        btn_diag = ttk.Button(card, text="🛠️  Diagnose & Synthesize Fix", style="Primary.TButton", command=self._on_diagnose_log)
-        btn_diag.pack(anchor="w", pady=10)
+        btn_row = ttk.Frame(card, style="Card.TFrame")
+        btn_row.pack(fill="x", pady=8)
+
+        btn_diag = ttk.Button(btn_row, text="🛠️  Diagnose Failure", style="Primary.TButton", command=self._on_diagnose_log)
+        btn_diag.pack(side="left", padx=(0, 10))
+
+        self.btn_apply_fix = ttk.Button(
+            btn_row,
+            text="⚡  Apply Recommended Fix",
+            style="Success.TButton",
+            command=self._on_apply_remediation,
+        )
+        self.btn_apply_fix.pack(side="left")
 
         self.lbl_diag_result = ttk.Label(card, text="", font=("Segoe UI", 10))
         self.lbl_diag_result.pack(anchor="w", pady=5)
@@ -566,13 +713,49 @@ class ZCFControlCenter:
             self.lbl_diag_result.config(text="No known fatal failure signatures detected. The application log appears normal.")
             return
 
+        app_desc = self.inspector.inspect(self.current_app_path) if (self.current_app_path and os.path.exists(self.current_app_path)) else None
+        if not app_desc:
+            from zcf.core.models import ApplicationDescription, Architecture, BinaryFormat, Subsystem
+            app_desc = ApplicationDescription(
+                artifact_path="/tmp/unknown.exe",
+                file_name="unknown.exe",
+                sha256="0" * 64,
+                byte_size=0,
+                format=BinaryFormat.PE,
+                architecture=Architecture.X86_64,
+                subsystem=Subsystem.GUI,
+            )
+
+        rem_plan = self.remediator.synthesize(app_desc, self.env_report, events)
+        self.last_remediation_commands = rem_plan.package_install_commands
+
         msg_lines = [f"Found {len(events)} compatibility event(s):"]
         for ev in events:
             msg_lines.append(f"• [{ev.signature}] {ev.root_cause}")
             msg_lines.append(f"  Fix: {ev.remediation}\n")
 
+        if rem_plan.package_install_commands:
+            msg_lines.append(f"Automated Command: {' && '.join(rem_plan.package_install_commands)}")
+
         self.lbl_diag_result.config(text="\n".join(msg_lines))
         self._show_info("Diagnosis Complete", "\n".join(msg_lines))
+
+    def _on_apply_remediation(self):
+        if not self.last_remediation_commands:
+            self._show_info("No Fix Pending", "Diagnose a log first to discover recommended fixes.")
+            return
+
+        cmd = " && ".join(self.last_remediation_commands)
+        confirm = self._ask_yes_no("Apply Fix", f"Execute the following system fix command?\n\n{cmd}")
+        if confirm:
+            def worker():
+                try:
+                    subprocess.run(cmd, shell=True, check=True)
+                    self.root.after(0, lambda: self._show_info("Fix Applied", "Successfully applied remediation!"))
+                except Exception as e:
+                    self.root.after(0, lambda: self._show_error("Fix Error", f"Remediation command failed: {e}"))
+
+            threading.Thread(target=worker, daemon=True).start()
 
     def run(self):
         self.root.mainloop()

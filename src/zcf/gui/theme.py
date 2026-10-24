@@ -18,6 +18,8 @@ DARK_THEME: Dict[str, str] = {
     "warning": "#f9e2af",
     "error": "#f38ba8",
     "error_fg": "#11111b",
+    "accent_green": "#a6e3a1",
+    "accent_red": "#f38ba8",
     "active_tab": "#313244",
 }
 

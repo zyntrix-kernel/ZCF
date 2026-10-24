@@ -1,15 +1,14 @@
 """
 Sandbox and Process Isolation Manager for ZCF.
-Provides unprivileged containerization via Bubblewrap (bwrap), Landlock, and resource limits.
+Provides unprivileged containerization via Bubblewrap (bwrap), namespace isolation, and resource limits.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -23,7 +22,7 @@ class SandboxPolicy:
 
 
 class SandboxManager:
-    """Orchestrates lightweight userspace process sandboxing."""
+    """Orchestrates lightweight userspace process sandboxing via Bubblewrap."""
 
     def __init__(self):
         self.bwrap_bin = shutil.which("bwrap")
@@ -31,6 +30,19 @@ class SandboxManager:
 
     def is_sandbox_available(self) -> bool:
         return self.has_bwrap
+
+    def get_sandbox_status(self) -> Dict[str, Any]:
+        """Returns observable diagnostic status of the sandboxing subsystem."""
+        return {
+            "backend": "bubblewrap" if self.has_bwrap else "none",
+            "available": self.has_bwrap,
+            "binary_path": self.bwrap_bin,
+            "supported_isolations": (
+                ["user_namespace", "pid_namespace", "net_namespace", "ipc_namespace", "ro_bind_mounts", "tmpfs"]
+                if self.has_bwrap
+                else []
+            ),
+        }
 
     def wrap_command(
         self,
@@ -54,9 +66,11 @@ class SandboxManager:
         # Essential virtual filesystems
         wrapped.extend(["--proc", "/proc", "--dev", "/dev"])
 
-        # Disposable tmpfs
+        # Disposable tmpfs or bound /tmp
         if pol.disposable_tmp:
             wrapped.extend(["--tmpfs", "/tmp"])
+        elif os.path.exists("/tmp"):
+            wrapped.extend(["--bind", "/tmp", "/tmp"])
 
         # Network isolation
         if pol.isolate_network:
@@ -66,10 +80,14 @@ class SandboxManager:
         wrapped.extend(["--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts"])
 
         # Bind application working directory
-        wrapped.extend(["--bind", working_dir, working_dir])
+        if os.path.exists(working_dir):
+            wrapped.extend(["--bind", working_dir, working_dir])
+
+        # Bind extra permitted writable locations (e.g. prefix_path, /run for display sockets)
         for extra_bind in pol.bind_mounts:
             if os.path.exists(extra_bind):
                 wrapped.extend(["--bind", extra_bind, extra_bind])
+
         wrapped.extend(["--chdir", working_dir])
 
         # Target command

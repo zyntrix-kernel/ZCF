@@ -8,22 +8,23 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from zcf.core.models import (
     ApplicationDescription,
+    Architecture,
     BinaryFormat,
     EnvironmentReport,
     ExecutionResult,
     ValidationResult,
+    WorkloadType,
 )
-from zcf.runtimes.base import RuntimeAdapterInterface
+from zcf.runtimes.base import BaseRuntimeAdapter
 from zcf.runtimes.prefix_manager import WinePrefixManager
 
 
-class WineAdapter(RuntimeAdapterInterface):
-    """Adapter for executing Windows PE applications via Wine."""
+class WineAdapter(BaseRuntimeAdapter):
+    """Adapter for executing Windows PE applications and MSI installers via Wine."""
 
     def __init__(self, prefix_manager: Optional[WinePrefixManager] = None, base_prefix_dir: Optional[str] = None):
         if prefix_manager:
@@ -39,18 +40,56 @@ class WineAdapter(RuntimeAdapterInterface):
     def get_name(self) -> str:
         return "Wine Compatibility Layer"
 
+    def get_version(self, env: Optional[EnvironmentReport] = None) -> Optional[str]:
+        if env:
+            for r in env.available_runtimes:
+                if r.runtime_id == "runtime.wine" and r.version:
+                    return r.version
+
+        wine_bin = shutil.which("wine64") or shutil.which("wine")
+        if wine_bin:
+            try:
+                out = subprocess.check_output([wine_bin, "--version"], text=True, timeout=5).strip()
+                return out
+            except Exception:
+                pass
+        return None
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        return {
+            "supported_formats": [BinaryFormat.PE.value, "msi"],
+            "supported_architectures": [Architecture.X86_64.value, Architecture.I386.value],
+            "supported_workloads": [WorkloadType.DESKTOP_GUI.value, WorkloadType.CLI_TOOL.value, WorkloadType.INSTALLER.value],
+            "requires_vulkan": False,
+            "requires_wayland": False,
+            "supports_sandboxing": True,
+            "supports_virtual_display": True,
+            "isolation_features": ["prefix", "winedebug", "dll_overrides", "bubblewrap"],
+            "known_limitations": [
+                "Kernel ring-0 anti-cheat drivers are unsupported in Wine userspace.",
+                "DirectX 12 requires modern Vulkan 1.3 drivers on host GPU.",
+            ],
+        }
+
     def is_available(self, env: EnvironmentReport) -> bool:
         for r in env.available_runtimes:
             if r.runtime_id == "runtime.wine":
                 return r.installed
         return shutil.which("wine64") is not None or shutil.which("wine") is not None
 
+    def check_prerequisites(self, app: ApplicationDescription, env: EnvironmentReport) -> List[str]:
+        missing: List[str] = []
+        if not self.is_available(env):
+            missing.append("Wine (wine64 or wine) package is not installed on host Linux system.")
+        return missing
+
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:
         errors: List[str] = []
         warnings: List[str] = []
 
-        if app.format != BinaryFormat.PE:
-            errors.append(f"Wine requires Windows PE format; target has format '{app.format.value}'")
+        is_msi = app.artifact_path.lower().endswith(".msi") or app.installer_format == "msi"
+        if app.format != BinaryFormat.PE and not is_msi:
+            errors.append(f"Wine requires Windows PE format or MSI installer; target has format '{app.format.value}'")
 
         if not self.is_available(env):
             errors.append("Wine (wine64 or wine) is not installed on this host system")
@@ -74,6 +113,7 @@ class WineAdapter(RuntimeAdapterInterface):
         env_vars = os.environ.copy()
         env_vars["WINEPREFIX"] = prefix_path
         env_vars["WINEDEBUG"] = config.get("winedebug", "-all") if config else "-all"
+        env_vars["WINEARCH"] = "win64" if app.architecture == Architecture.X86_64 else "win32"
 
         # Apply DLL overrides if specified
         if config and "dll_overrides" in config:
@@ -85,8 +125,21 @@ class WineAdapter(RuntimeAdapterInterface):
         return {
             "prefix_path": prefix_path,
             "environment_variables": env_vars,
-            "working_directory": os.path.dirname(app.artifact_path),
+            "working_directory": os.path.dirname(os.path.abspath(app.artifact_path)),
         }
+
+    def build_command(
+        self, app: ApplicationDescription, context: Dict[str, Any], args: Optional[List[str]] = None
+    ) -> List[str]:
+        wine_bin = shutil.which("wine64") or shutil.which("wine") or "wine"
+        abs_target = os.path.abspath(app.artifact_path)
+        app_args = args or []
+
+        # Check if target is an MSI installer
+        if abs_target.lower().endswith(".msi") or app.installer_format == "msi":
+            return [wine_bin, "msiexec", "/i", abs_target] + app_args
+
+        return [wine_bin, abs_target] + app_args
 
     def execute(
         self,
@@ -94,58 +147,19 @@ class WineAdapter(RuntimeAdapterInterface):
         context: Dict[str, Any],
         args: Optional[List[str]] = None,
         dry_run: bool = False,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        timeout: Optional[int] = None,
     ) -> ExecutionResult:
-        wine_bin = shutil.which("wine64") or shutil.which("wine") or "wine"
-        cmd = [wine_bin, app.artifact_path] + (args or [])
+        cmd = self.build_command(app, context, args)
+        return self._execute_process(
+            cmd=cmd,
+            context=context,
+            dry_run=dry_run,
+            stream_callback=stream_callback,
+            timeout=timeout,
+        )
 
-        if dry_run:
-            return ExecutionResult(
-                success=True,
-                exit_code=0,
-                stdout=f"[Dry Run] Prepared Wine prefix: {context.get('prefix_path')}\nCommand: {' '.join(cmd)}",
-                stderr="",
-                execution_time_seconds=0.0,
-                command=cmd,
-                isolated_env_path=context.get("prefix_path"),
-            )
-
-        start_time = time.time()
-        try:
-            res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=context.get("working_directory"),
-                env=context.get("environment_variables"),
-                timeout=15,
-            )
-            elapsed = time.time() - start_time
-            return ExecutionResult(
-                success=res.returncode == 0,
-                exit_code=res.returncode,
-                stdout=res.stdout,
-                stderr=res.stderr,
-                execution_time_seconds=elapsed,
-                command=cmd,
-                isolated_env_path=context.get("prefix_path"),
-            )
-        except subprocess.TimeoutExpired:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr="Wine execution timed out after 15 seconds",
-                execution_time_seconds=15.0,
-                command=cmd,
-                isolated_env_path=context.get("prefix_path"),
-            )
-        except Exception as e:
-            return ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout="",
-                stderr=str(e),
-                execution_time_seconds=time.time() - start_time,
-                command=cmd,
-                isolated_env_path=context.get("prefix_path"),
-            )
+    def cleanup(self, app: ApplicationDescription, context: Dict[str, Any]) -> None:
+        prefix_path = context.get("prefix_path")
+        if prefix_path and context.get("ephemeral", False):
+            self.prefix_manager.cleanup_prefix(prefix_path)

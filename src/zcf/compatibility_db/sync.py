@@ -55,21 +55,7 @@ class CompatibilitySyncManager:
 
         for r_entry in raw_entries:
             try:
-                entry = CompatibilityEntry(
-                    entry_id=r_entry["entry_id"],
-                    application_name=r_entry["application_name"],
-                    version=r_entry.get("version"),
-                    target_sha256=r_entry["target_sha256"],
-                    target_format=r_entry["target_format"],
-                    target_architecture=r_entry.get("target_architecture", "unknown"),
-                    status=CompatibilityStatus(r_entry["status"]),
-                    last_verified=r_entry["last_verified"],
-                    recommended_runtime=r_entry.get("recommended_runtime"),
-                    verified_environment=r_entry.get("verified_environment", {}),
-                    workarounds=r_entry.get("workarounds", []),
-                    diagnostic_signatures=r_entry.get("diagnostic_signatures", []),
-                    provenance=r_entry.get("provenance", {}),
-                )
+                entry = self.db._dict_to_entry(r_entry)
 
                 existing = self.db.get_by_id(entry.entry_id)
                 if not existing or (overwrite_older and entry.last_verified >= existing.last_verified):

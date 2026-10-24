@@ -10,7 +10,13 @@ import os
 from typing import Any, Dict, List, Optional
 
 from zcf.core.exceptions import InspectionError, UnsupportedFormatError
-from zcf.core.models import ApplicationDescription, Architecture, BinaryFormat, Subsystem
+from zcf.core.models import (
+    ApplicationDescription,
+    Architecture,
+    BinaryFormat,
+    Subsystem,
+    WorkloadType,
+)
 from zcf.inspector.apk import APKParser
 from zcf.inspector.elf import ELFParser
 from zcf.inspector.macho import MachOParser
@@ -43,6 +49,31 @@ class ApplicationInspector:
         parsed_info = self._detect_and_parse(header_bytes, file_name)
         security_indicators = self._detect_security_indicators(header_bytes)
 
+        is_installer = parsed_info.get("is_installer", False) or file_name.lower().endswith(".msi")
+        installer_format = parsed_info.get("installer_format", "msi" if file_name.lower().endswith(".msi") else None)
+
+        declared_deps = (
+            parsed_info.get("declared_dependencies")
+            or parsed_info.get("imported_dlls")
+            or parsed_info.get("needed_libraries")
+            or []
+        )
+
+        # Determine workload type
+        if is_installer or "setup" in file_name.lower() or "installer" in file_name.lower():
+            workload_type = WorkloadType.INSTALLER
+        elif any(
+            dep.lower() in ("d3d11.dll", "d3d12.dll", "dxgi.dll", "vulkan-1.dll", "opengl32.dll")
+            for dep in declared_deps
+        ) or security_indicators.get("has_anti_cheat"):
+            workload_type = WorkloadType.GAME
+        elif parsed_info.get("subsystem") == Subsystem.GUI:
+            workload_type = WorkloadType.DESKTOP_GUI
+        elif parsed_info.get("subsystem") in (Subsystem.CONSOLE, Subsystem.POSIX):
+            workload_type = WorkloadType.CLI_TOOL
+        else:
+            workload_type = WorkloadType.UNKNOWN
+
         return ApplicationDescription(
             artifact_path=os.path.abspath(artifact_path),
             file_name=file_name,
@@ -53,16 +84,26 @@ class ApplicationInspector:
             subsystem=parsed_info.get("subsystem", Subsystem.UNKNOWN),
             is_managed=parsed_info.get("is_managed", False),
             runtime_family=parsed_info.get("runtime_family"),
-            declared_dependencies=parsed_info.get("declared_dependencies")
-            or parsed_info.get("imported_dlls")
-            or parsed_info.get("needed_libraries")
-            or [],
+            declared_dependencies=declared_deps,
             entry_point=parsed_info.get("entry_point"),
             security_indicators=security_indicators,
             limitations=parsed_info.get("limitations", []),
+            workload_type=workload_type,
+            is_installer=is_installer,
+            installer_format=installer_format,
         )
 
     def _detect_and_parse(self, data: bytes, file_name: str) -> Dict[str, Any]:
+        # 0. Windows MSI Installer (OLE Compound Document signature or .msi extension)
+        if file_name.lower().endswith(".msi") or (len(data) >= 8 and data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            return {
+                "format": BinaryFormat.PE,
+                "architecture": Architecture.X86_64,
+                "subsystem": Subsystem.GUI,
+                "is_installer": True,
+                "installer_format": "msi",
+                "declared_dependencies": ["msi.dll", "kernel32.dll"],
+            }
         # 1. Windows PE
         if len(data) >= 2 and data[:2] == b"MZ":
             try:

@@ -3,7 +3,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: Cross-Distribution](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-green.svg)](#)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#)
-[![Tests: 47 Passed (100%)](https://img.shields.io/badge/Tests-47%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Tests: 57 Passed (100%)](https://img.shields.io/badge/Tests-57%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](.github/workflows/ci.yml)
 [![Release: v0.2.0 Distro-Grade](https://img.shields.io/badge/Release-v0.2.0%20Distro--Grade-blue.svg)](#)
 [![REA: 6.7.0 Verified](https://img.shields.io/badge/REA-6.7.0%20Verified-purple.svg)](docs/REA_SETUP.md)
 
@@ -146,6 +147,9 @@ ZCF integrates with **REA 6.7.0** ([morluto/rea](https://github.com/morluto/rea)
 ## 5. Documentation Directory
 
 - **Host Diagnostic Report:** [`docs/ENVIRONMENT_REPORT.md`](docs/ENVIRONMENT_REPORT.md)
+- **Runtime Adapter Authoring Guide:** [`docs/ADAPTER_AUTHORING.md`](docs/ADAPTER_AUTHORING.md)
+- **Compatibility Profile Contribution Guidelines:** [`docs/CONTRIBUTING_PROFILES.md`](docs/CONTRIBUTING_PROFILES.md)
+- **Security & Process Isolation Model:** [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
 - **REA Setup & Audit:** [`docs/REA_SETUP.md`](docs/REA_SETUP.md)
 - **Compatibility Tool Inventory:** [`docs/COMPATIBILITY_TOOL_INVENTORY.md`](docs/COMPATIBILITY_TOOL_INVENTORY.md)
 - **Compatibility Model & Taxonomy:** [`docs/COMPATIBILITY_MODEL.md`](docs/COMPATIBILITY_MODEL.md)
@@ -163,13 +167,14 @@ ZCF integrates with **REA 6.7.0** ([morluto/rea](https://github.com/morluto/rea)
 ```bash
 # On Windows PowerShell
 $env:PYTHONPATH="src"
+$env:ZCF_NON_INTERACTIVE="1"
 python -m unittest discover -s tests -v
 
 # On Linux (or WSL2)
 bash tests/run_tests.sh
 ```
 
-All **47 automated tests** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
+All **57 automated tests** across **20 test suites** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
 
 ---
 

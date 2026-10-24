@@ -305,10 +305,41 @@ def cmd_db(args):
         entries = db.list_all()
         format_header(f"ZCF Compatibility Database ({len(entries)} entries)")
         for entry in entries:
-            print(f"  [{entry.entry_id}] {entry.application_name} ({entry.target_format.upper()} {entry.target_architecture})")
-            print(f"    Status:      {entry.status.value}")
+            tier_badge = f"[{entry.provenance_tier.value}]"
+            print(f"  [{entry.entry_id}] {entry.application_name} ({entry.target_format.upper()} {entry.target_architecture}) {tier_badge}")
+            print(f"    Status:      {entry.status.value} (Evidence: {entry.evidence_status.value})")
             print(f"    SHA-256:     {entry.target_sha256[:16]}...")
             print(f"    Recommended: {entry.recommended_runtime or 'None'}\n")
+    elif args.action == "query":
+        entries = db.query(
+            runtime=getattr(args, "runtime", None),
+            arch=getattr(args, "arch", None),
+            status=getattr(args, "status", None),
+        )
+        format_header(f"ZCF Database Query Results ({len(entries)} matching entries)")
+        for entry in entries:
+            print(f"  [{entry.entry_id}] {entry.application_name} -> {entry.recommended_runtime} ({entry.status.value})")
+    elif args.action == "submit":
+        if not getattr(args, "app", None):
+            print("Error: --app <path> is required for 'submit' action.", file=sys.stderr)
+            sys.exit(1)
+        from zcf.inspector.inspector import ApplicationInspector
+        from zcf.core.models import CompatibilityStatus
+        app = ApplicationInspector().inspect(args.app)
+        status_enum = CompatibilityStatus.VERIFIED_COMPATIBLE
+        if getattr(args, "status", None):
+            try:
+                status_enum = CompatibilityStatus(args.status)
+            except Exception:
+                pass
+        entry = db.submit_profile(
+            app=app,
+            recommended_runtime=getattr(args, "runtime", "runtime.wine") or "runtime.wine",
+            status=status_enum,
+            contributor_name=getattr(args, "contributor", "Community Contributor") or "Community Contributor",
+            test_procedure=getattr(args, "test_procedure", "Community execution test") or "Community execution test",
+        )
+        print(f"[ZCF Database] Successfully submitted community profile: {entry.entry_id}")
     elif args.action == "show":
         entry = db.get_by_id(args.id)
         if entry:
@@ -427,8 +458,14 @@ def main(argv: Optional[List[str]] = None):
 
     # db
     p_db = subparsers.add_parser("db", help="Query or inspect the compatibility knowledge base")
-    p_db.add_argument("action", choices=["list", "show", "export", "import"], help="Action to perform")
+    p_db.add_argument("action", choices=["list", "show", "query", "submit", "export", "import"], help="Action to perform")
     p_db.add_argument("--id", help="Entry ID (for 'show' action)")
+    p_db.add_argument("--app", help="Path to application binary (for 'submit' action)")
+    p_db.add_argument("--runtime", help="Runtime identifier (for 'query' or 'submit')")
+    p_db.add_argument("--arch", help="Architecture (for 'query')")
+    p_db.add_argument("--status", help="Compatibility status (for 'query' or 'submit')")
+    p_db.add_argument("--contributor", help="Contributor name or email (for 'submit')")
+    p_db.add_argument("--test-procedure", help="Description of test procedure (for 'submit')")
     p_db.add_argument("--output", help="Output file path (for 'export')")
     p_db.add_argument("--file", help="Input file path (for 'import')")
     p_db.set_defaults(func=cmd_db)
