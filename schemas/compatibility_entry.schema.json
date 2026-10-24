@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZCF Compatibility Knowledge Entry Schema",
+  "description": "Evidence-backed record stored in the ZCF Compatibility Database",
+  "type": "object",
+  "required": ["entry_id", "application_name", "target_sha256", "target_format", "status", "last_verified"],
+  "properties": {
+    "entry_id": { "type": "string" },
+    "application_name": { "type": "string" },
+    "version": { "type": ["string", "null"] },
+    "target_sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "target_format": { "type": "string", "enum": ["pe", "elf", "macho", "script", "archive"] },
+    "target_architecture": { "type": "string" },
+    "status": { "type": "string", "enum": ["verified_compatible", "compatible_with_workaround", "partially_compatible", "incompatible", "untested"] },
+    "recommended_runtime": { "type": "string" },
+    "verified_environment": {
+      "type": "object",
+      "properties": {
+        "os": { "type": "string" },
+        "kernel": { "type": "string" },
+        "architecture": { "type": "string" },
+        "runner_version": { "type": "string" }
+      }
+    },
+    "workarounds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["issue", "solution"],
+        "properties": {
+          "issue": { "type": "string" },
+          "solution": { "type": "string" },
+          "automated_apply": { "type": "boolean" }
+        }
+      }
+    },
+    "diagnostic_signatures": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["authority", "contributor"],
+      "properties": {
+        "authority": { "type": "string", "enum": ["automated-ci", "rea-agent", "maintainer-verified", "community"] },
+        "contributor": { "type": "string" },
+        "source_reference": { "type": ["string", "null"] }
+      }
+    },
+    "last_verified": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

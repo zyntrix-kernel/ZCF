@@ -1,0 +1,256 @@
+"""
+Command-Line Interface (CLI) for ZCF.
+Provides user-facing commands for inspection, planning, testing, diagnostics, and database querying.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from typing import List, Optional
+
+from zcf import __version__
+from zcf.compatibility_db.database import CompatibilityDatabase
+from zcf.diagnostics.analyzer import DiagnosticEngine
+from zcf.environment.inspector import EnvironmentInspector
+from zcf.inspector.inspector import ApplicationInspector
+from zcf.planner.engine import CompatibilityPlanner
+from zcf.runtimes.registry import RuntimeRegistry
+from zcf.security.controller import SecurityController
+
+
+def format_header(title: str):
+    print(f"\n=======================================================")
+    print(f"  {title}")
+    print(f"=======================================================")
+
+
+def cmd_inspect(args):
+    inspector = ApplicationInspector()
+    try:
+        app = inspector.inspect(args.artifact_path)
+        if args.json:
+            print(json.dumps(app.to_dict(), indent=2))
+        else:
+            format_header(f"ZCF Application Inspection: {app.file_name}")
+            print(f"  File Path:      {app.artifact_path}")
+            print(f"  SHA-256:        {app.sha256}")
+            print(f"  Byte Size:      {app.byte_size:,} bytes")
+            print(f"  Binary Format:  {app.format.value.upper()}")
+            print(f"  Architecture:   {app.architecture.value}")
+            print(f"  Subsystem:      {app.subsystem.value}")
+            print(f"  Is Managed:     {'Yes (.NET / CLI)' if app.is_managed else 'No (Native)'}")
+            if app.entry_point:
+                print(f"  Entry Point:    {app.entry_point}")
+            if app.limitations:
+                print(f"  Limitations:    {', '.join(app.limitations)}")
+    except Exception as e:
+        print(f"Error during inspection: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_env(args):
+    inspector = EnvironmentInspector()
+    try:
+        env = inspector.inspect()
+        if args.json:
+            print(json.dumps(env.to_dict(), indent=2))
+        else:
+            format_header("ZCF Host Environment Report")
+            print(f"  Operating System: {env.os_name.capitalize()} ({env.distribution or 'generic'} {env.release or ''})")
+            print(f"  Kernel:           {env.kernel_version}")
+            print(f"  CPU Architecture: {env.architecture}")
+            print(f"  Logical Cores:    {env.logical_cores}")
+            print(f"  Total Memory:     {env.total_memory_mb:,} MB")
+            print(f"  Display Server:   {env.display_server.value.upper()}")
+            print("\n  Discovered Compatibility Runtimes:")
+            for r in env.available_runtimes:
+                status_str = f"INSTALLED ({r.version or 'active'})" if r.installed else "NOT INSTALLED"
+                print(f"    - {r.name:<36} : {status_str}")
+    except Exception as e:
+        print(f"Error during environment inspection: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_plan(args):
+    app_inspector = ApplicationInspector()
+    env_inspector = EnvironmentInspector()
+    planner = CompatibilityPlanner()
+
+    try:
+        app = app_inspector.inspect(args.artifact_path)
+        env = env_inspector.inspect()
+        plan = planner.plan(app, env)
+
+        if args.json:
+            print(json.dumps(plan.to_dict(), indent=2))
+        else:
+            format_header(f"ZCF Compatibility Plan: {app.file_name}")
+            print(f"  Plan ID:          {plan.plan_id}")
+            print(f"  Execution Mode:   {plan.execution_mode.value.upper()}")
+            print(f"  Selected Runtime: {plan.selected_runtime_name or 'None'}")
+            print(f"  Confidence Score: {plan.confidence_score * 100:.1f}%")
+            print(f"\n  Reasoning:")
+            print(f"    {plan.reasoning}")
+
+            if plan.satisfied_requirements:
+                print("\n  Satisfied Requirements:")
+                for req in plan.satisfied_requirements:
+                    print(f"    [+] {req}")
+
+            if plan.missing_requirements:
+                print("\n  Missing Requirements:")
+                for req in plan.missing_requirements:
+                    print(f"    [-] {req}")
+
+            if plan.safe_next_steps:
+                print("\n  Recommended Next Steps:")
+                for step in plan.safe_next_steps:
+                    print(f"    > {step}")
+    except Exception as e:
+        print(f"Error during planning: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_test(args):
+    app_inspector = ApplicationInspector()
+    env_inspector = EnvironmentInspector()
+    registry = RuntimeRegistry()
+    planner = CompatibilityPlanner(registry)
+    security = SecurityController()
+
+    try:
+        security.validate_execution_safety(args.artifact_path)
+        app = app_inspector.inspect(args.artifact_path)
+        env = env_inspector.inspect()
+        plan = planner.plan(app, env)
+
+        format_header(f"ZCF Execution Test: {app.file_name}")
+        print(f"  Selected Runtime: {plan.selected_runtime_name}")
+        print(f"  Execution Mode:   {plan.execution_mode.value.upper()}")
+
+        if not plan.selected_runtime_id or plan.execution_mode.value == "blocked":
+            print(f"\n  Execution Blocked: {plan.reasoning}", file=sys.stderr)
+            for req in plan.missing_requirements:
+                print(f"  [-] Missing requirement: {req}", file=sys.stderr)
+            sys.exit(2)
+
+        adapter = registry.get_adapter(plan.selected_runtime_id)
+        if not adapter:
+            print(f"Error: Adapter '{plan.selected_runtime_id}' not found in registry", file=sys.stderr)
+            sys.exit(1)
+
+        context = adapter.prepare_environment(app)
+        result = adapter.execute(app, context, dry_run=args.dry_run)
+
+        print(f"\n  Result Status:    {'SUCCESS' if result.success else 'FAILED'}")
+        print(f"  Exit Code:        {result.exit_code}")
+        print(f"  Execution Time:   {result.execution_time_seconds:.4f}s")
+        if result.stdout:
+            print(f"\n  Output:\n{result.stdout.strip()}")
+        if result.stderr:
+            print(f"\n  Error Output:\n{result.stderr.strip()}")
+
+    except Exception as e:
+        print(f"Error during execution test: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_diag(args):
+    diag = DiagnosticEngine()
+    try:
+        with open(args.log_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        events = diag.analyze_log(content)
+        if args.json:
+            print(json.dumps([e.to_dict() for e in events], indent=2))
+        else:
+            format_header(f"ZCF Diagnostic Log Analysis: {args.log_path}")
+            if not events:
+                print("  No known failure signatures recognized in log.")
+            else:
+                print(f"  Detected {len(events)} diagnostic event(s):\n")
+                for i, ev in enumerate(events, 1):
+                    print(f"  [{i}] Signature: {ev.signature} (Confidence: {ev.confidence*100:.0f}%)")
+                    print(f"      Matched:   {ev.matched_text}")
+                    print(f"      Root Cause:{ev.root_cause}")
+                    print(f"      Action:    {ev.remediation}\n")
+    except Exception as e:
+        print(f"Error during log analysis: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_db(args):
+    db = CompatibilityDatabase()
+    if args.action == "list":
+        entries = db.list_all()
+        format_header(f"ZCF Compatibility Database ({len(entries)} entries)")
+        for entry in entries:
+            print(f"  [{entry.entry_id}] {entry.application_name} ({entry.target_format.upper()} {entry.target_architecture})")
+            print(f"    Status:      {entry.status.value}")
+            print(f"    SHA-256:     {entry.target_sha256[:16]}...")
+            print(f"    Recommended: {entry.recommended_runtime or 'None'}\n")
+    elif args.action == "show":
+        entry = db.get_by_id(args.id)
+        if entry:
+            print(json.dumps(entry.to_dict(), indent=2))
+        else:
+            print(f"Entry not found: {args.id}", file=sys.stderr)
+            sys.exit(1)
+
+
+def main(argv: Optional[List[str]] = None):
+    parser = argparse.ArgumentParser(
+        prog="zcf",
+        description="Zyntrix Compatibility Fabric (ZCF) — Universal Application Compatibility Engine",
+    )
+    parser.add_argument("--version", action="version", version=f"ZCF {__version__} (Apache-2.0)")
+
+    subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+
+    # inspect
+    p_inspect = subparsers.add_parser("inspect", help="Inspect an application binary or script")
+    p_inspect.add_argument("artifact_path", help="Path to executable or script")
+    p_inspect.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_inspect.set_defaults(func=cmd_inspect)
+
+    # env
+    p_env = subparsers.add_parser("env", help="Inspect host environment and compatibility runtimes")
+    p_env.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_env.set_defaults(func=cmd_env)
+
+    # plan
+    p_plan = subparsers.add_parser("plan", help="Generate compatibility plan for an application")
+    p_plan.add_argument("artifact_path", help="Path to target executable")
+    p_plan.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_plan.set_defaults(func=cmd_plan)
+
+    # test
+    p_test = subparsers.add_parser("test", help="Test application compatibility execution")
+    p_test.add_argument("artifact_path", help="Path to target executable")
+    p_test.add_argument("--dry-run", action="store_true", default=True, help="Perform safe dry-run plan test")
+    p_test.set_defaults(func=cmd_test)
+
+    # diag
+    p_diag = subparsers.add_parser("diag", help="Analyze failure log and recommend remediations")
+    p_diag.add_argument("log_path", help="Path to error log file")
+    p_diag.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_diag.set_defaults(func=cmd_diag)
+
+    # db
+    p_db = subparsers.add_parser("db", help="Query or inspect the compatibility knowledge base")
+    p_db.add_argument("action", choices=["list", "show"], help="Action to perform")
+    p_db.add_argument("--id", help="Entry ID (for 'show' action)")
+    p_db.set_defaults(func=cmd_db)
+
+    args = parser.parse_args(argv)
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

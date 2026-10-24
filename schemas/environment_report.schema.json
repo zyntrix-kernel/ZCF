@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZCF Environment Report Schema",
+  "description": "Structured representation of host system capabilities and compatibility runtimes",
+  "type": "object",
+  "required": ["os_name", "architecture", "kernel_version", "available_runtimes"],
+  "properties": {
+    "os_name": { "type": "string" },
+    "distribution": { "type": "string" },
+    "release": { "type": "string" },
+    "kernel_version": { "type": "string" },
+    "architecture": { "type": "string" },
+    "cpu_model": { "type": "string" },
+    "logical_cores": { "type": "integer" },
+    "total_memory_mb": { "type": "integer" },
+    "display_server": { "type": "string", "enum": ["x11", "wayland", "windows", "headless", "unknown"] },
+    "graphics_capabilities": {
+      "type": "object",
+      "properties": {
+        "vulkan_supported": { "type": "boolean" },
+        "opengl_version": { "type": ["string", "null"] },
+        "hardware_acceleration": { "type": "boolean" }
+      }
+    },
+    "available_runtimes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["runtime_id", "name", "installed", "version"],
+        "properties": {
+          "runtime_id": { "type": "string" },
+          "name": { "type": "string" },
+          "installed": { "type": "boolean" },
+          "version": { "type": ["string", "null"] },
+          "binary_path": { "type": ["string", "null"] },
+          "supported_formats": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "isolation_features": {
+      "type": "object",
+      "properties": {
+        "can_sandbox": { "type": "boolean" },
+        "namespaces_available": { "type": "boolean" },
+        "root_privileges": { "type": "boolean" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

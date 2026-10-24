@@ -1,0 +1,5 @@
+[2026-10-24 14:00:01] Starting application execution...
+./test_app: error while loading shared libraries: libvulkan.so.1: cannot open shared object file: No such file or directory
+err:module:import_dll Library D3DX9_43.dll not found
+wine: Unhandled page fault on read access to 0x00000000 address 0x00401234, ip 0x7bc45678
+cannot open display: :0
