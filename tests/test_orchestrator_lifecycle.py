@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from zcf.core.exceptions import SecurityViolationError
+from zcf.core.exceptions import PlanningError, SecurityViolationError
 from zcf.core.models import (
     ApplicationDescription,
     Architecture,
@@ -88,7 +88,17 @@ class TestOrchestratorLifecycle(unittest.TestCase):
         self.assertIn("ZCF Native Lifecycle Execution Successful", res.stdout)
         self.assertIsNotNone(res.effective_security_policy)
 
-    def test_orchestrator_execute_lifecycle_wine_dry_run(self):
+    @patch("zcf.execution.runner.EnvironmentInspector.inspect")
+    @patch("zcf.runtimes.wine.WineAdapter.is_available", return_value=True)
+    def test_orchestrator_execute_lifecycle_wine_dry_run(self, mock_wine_avail, mock_env):
+        mock_env.return_value = EnvironmentReport(
+            os_name="linux",
+            architecture="x86_64",
+            kernel_version="6.18",
+            available_runtimes=[
+                RuntimeInfo(runtime_id="runtime.wine", name="Wine Compatibility Layer", installed=True, version="wine-9.0"),
+            ],
+        )
         test_pe = os.path.abspath("fixtures/synthetic/valid_pe32plus.exe")
         res = self.orchestrator.execute_lifecycle(
             artifact_path=test_pe,
@@ -99,8 +109,28 @@ class TestOrchestratorLifecycle(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertTrue(res.success)
         self.assertEqual(res.exit_code, 0)
-        self.assertIn(res.effective_runtime, ("runtime.wine", "runtime.native"))
+        self.assertEqual(res.effective_runtime, "runtime.wine")
         self.assertIn("[Dry Run]", res.stdout)
+
+    @patch("zcf.execution.runner.EnvironmentInspector.inspect")
+    @patch("zcf.runtimes.wine.WineAdapter.is_available", return_value=False)
+    def test_orchestrator_execute_lifecycle_wine_missing_runtime_fails(self, mock_wine_avail, mock_env):
+        mock_env.return_value = EnvironmentReport(
+            os_name="linux",
+            architecture="x86_64",
+            kernel_version="6.18",
+            available_runtimes=[],
+        )
+        test_pe = os.path.abspath("fixtures/synthetic/valid_pe32plus.exe")
+        with self.assertRaises(PlanningError) as ctx:
+            self.orchestrator.execute_lifecycle(
+                artifact_path=test_pe,
+                use_sandbox=False,
+                dry_run=True,
+                auto_install=False,
+                timeout=10,
+            )
+        self.assertIn("is not installed", str(ctx.exception))
 
     @patch("zcf.execution.runner.SandboxManager.is_sandbox_available", return_value=False)
     def test_orchestrator_sandbox_fail_closed(self, mock_sb_avail):

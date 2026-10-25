@@ -12,7 +12,7 @@
 
 ZCF enforces strict automated verification. Tests cover both positive execution paths and failure/negative paths. Speculative claims of compatibility are rejected; every capability asserted by the framework is backed by automated tests against real binaries, synthetic test fixtures, and distribution integration files.
 
-### Test Categories (20 Modules, 64 Tests)
+### Test Categories (20 Modules, 65 Tests)
 1. **Desktop UX & Beginner Dialogs (`test_desktop_ux.py`):** Tests Zenity/KDialog graphical modals, non-interactive fallbacks, and `.desktop` application menu integration.
 2. **Graphical User Interface (`test_gui.py`):** Tests standalone Tkinter/ttk `ZCFControlCenter` tabs (Launch, Runtimes, Components, Prefixes, Diag), application inspection updates, and log diagnosis without UI freezing.
 3. **Windows Component Manager (`test_components.py`):** Tests component definitions (Visual C++, DirectX D3DX9, Wine Mono, DXVK), prefix verification, automated winetricks handling, failure when winetricks is missing without dummy file fabrication, non-zero installer exits, and missing DLL verification.
@@ -45,13 +45,13 @@ $env:PYTHONPATH="src"
 $env:ZCF_NON_INTERACTIVE="1"
 python -m unittest discover -s tests -v
 ```
-**Outcome:** Ran 64 tests in 7.273s — **OK (100% Passed)**
+**Outcome:** Ran 65 tests in 24.858s — **OK (100% Passed)**
 
 ### 2.2 Linux Environment (WSL2 Ubuntu 26.04 LTS)
 ```bash
 bash tests/run_tests.sh
 ```
-**Outcome:** Ran 64 tests in 12.155s — **OK (100% Passed)**
+**Outcome:** Ran 65 tests in 13.920s — **OK (100% Passed)**
 
 ---
 
@@ -60,8 +60,8 @@ bash tests/run_tests.sh
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS |
 | :--- | :--- | :--- |
 | **Total Test Files** | 20 | 20 |
-| **Total Test Cases** | 64 | 64 |
-| **Passing Tests** | 64 (100%) | 64 (100%) |
+| **Total Test Cases** | 65 | 65 |
+| **Passing Tests** | 65 (100%) | 65 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 7.273s | 12.155s |
+| **Execution Duration**| 24.858s | 13.920s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |
