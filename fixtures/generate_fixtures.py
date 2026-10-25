@@ -64,4 +64,10 @@ with open(os.path.join(fixtures_dir, "valid_script.sh"), "wb") as f:
 with open(os.path.join(fixtures_dir, "corrupted.bin"), "wb") as f:
     f.write(b"\x00\x01\x02\x03\x04\x05")
 
-print("Generated all synthetic test fixtures successfully.")
+import hashlib
+print("Generated all synthetic test fixtures successfully. Computed fixture hashes:")
+for fname in sorted(os.listdir(fixtures_dir)):
+    fpath = os.path.join(fixtures_dir, fname)
+    if os.path.isfile(fpath):
+        h = hashlib.sha256(open(fpath, "rb").read()).hexdigest()
+        print(f"  {fname}: {h}")

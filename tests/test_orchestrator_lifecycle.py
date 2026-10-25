@@ -234,6 +234,73 @@ class TestOrchestratorLifecycle(unittest.TestCase):
 
         mock_stop.assert_called_once()
 
+    def test_orchestrator_negative_timeout_rejected(self):
+        """Negative timeouts must be rejected immediately."""
+        script_file = os.path.join(self.temp_dir, "test_quick.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write('print("quick")\n')
+
+        with self.assertRaises(ValueError):
+            self.orchestrator.execute_lifecycle(
+                artifact_path=script_file,
+                use_sandbox=False,
+                timeout=-10,
+            )
+
+    def test_orchestrator_timeout_clamped_and_warned(self):
+        """User timeout exceeding policy ceiling is clamped and recorded in warnings."""
+        script_file = os.path.join(self.temp_dir, "test_quick.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write('print("quick")\n')
+
+        # Configure security controller with a low ceiling (e.g. 5s)
+        self.orchestrator.security_controller.max_timeout_seconds = 5
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=script_file,
+            use_sandbox=False,
+            timeout=100,
+        )
+        self.assertTrue(res.success)
+        self.assertTrue(any("exceeds policy maximum" in w for w in res.security_warnings))
+
+    def test_orchestrator_truthful_resource_limits_status(self):
+        """Resource limit status reports exact enforcement mechanism and virtual memory semantics."""
+        script_file = os.path.join(self.temp_dir, "test_quick.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write('print("quick")\n')
+
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=script_file,
+            use_sandbox=False,
+            timeout=10,
+        )
+        self.assertTrue(res.success)
+        r_status = res.effective_security_policy.get("resource_limits_status", {})
+        self.assertIn("applied", r_status)
+        self.assertIn("mechanism", r_status)
+        self.assertIn("virtual_address_space_limit_mb", r_status)
+        self.assertIn("details", r_status)
+
+    def test_orchestrator_child_retaining_pipe_timeout_cleanup(self):
+        """Process hierarchy with lingering child holding pipe terminates cleanly on timeout."""
+        lingering_script = os.path.join(self.temp_dir, "lingering.py")
+        with open(lingering_script, "w", encoding="utf-8") as f:
+            f.write(
+                'import subprocess, sys, time\n'
+                '# Launch detached sleep child retaining stdout\n'
+                'p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdout=sys.stdout)\n'
+                'time.sleep(30)\n'
+            )
+
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=lingering_script,
+            use_sandbox=False,
+            timeout=1,
+        )
+        self.assertEqual(res.exit_code, 124)
+        self.assertFalse(res.success)
+        self.assertIn("timed out", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

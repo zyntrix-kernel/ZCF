@@ -4,8 +4,8 @@
 **Document:** `docs/TESTING.md`  
 **Date:** October 25, 2026  
 **Test Framework:** Python `unittest` standard test runner  
-**Test Execution Environments:** Windows 11 Pro Host + WSL2 Ubuntu 24.04 / 26.04 LTS (with xvfb)  
-**Milestone:** 2 (Prefix Data Safety, Process Lifecycle & Trust Integrity)  
+**Test Execution Environments:** Windows 11 Pro Host + WSL2 Ubuntu 26.04 LTS (with xvfb)  
+**Milestone:** 3 (Close the Remaining Security and Evidence Gaps)  
 
 ---
 
@@ -13,14 +13,14 @@
 
 ZCF enforces strict automated verification. Tests cover both positive execution paths and failure/negative paths. Speculative claims of compatibility are rejected; every capability asserted by the framework is backed by automated tests against real binaries, synthetic test fixtures, and distribution integration files.
 
-### Test Categories (21 Modules, 95 Tests)
+### Test Categories (21 Modules, 108 Tests)
 1. **Desktop UX & Beginner Dialogs (`test_desktop_ux.py`):** Tests Zenity/KDialog graphical modals, non-interactive fallbacks, Freedesktop specification path escaping (`%`, `$`, `"`, `\`), and rejection of control characters and newlines with `ValueError`.
 2. **Graphical User Interface (`test_gui.py`):** Tests standalone Tkinter/ttk `ZCFControlCenter` tabs (Launch, Runtimes, Components, Prefixes, Diag), unified Wine and Proton prefix lifecycle management, application inspection updates, and log diagnosis without UI freezing under `xvfb`.
 3. **Windows Component Manager (`test_components.py`):** Tests component definitions (Visual C++, DirectX D3DX9, Wine Mono, DXVK), strict all-DLL filesystem verification (`system32`/`syswow64`), removal of metadata fallback, automated winetricks handling, non-blocking monotonic deadline loops, process killing on timeout, and cleanup of stale metadata on installation failures.
 4. **Prefix Lifecycle & Storage Manager (`test_prefix_lifecycle.py`):** Tests default prefix persistence, protection of prefixes with missing or corrupt metadata, active process lock detection, disposable vs persistent preview, dry-run state isolation, and containment within configured roots.
-5. **Compatibility Database & Migration (`test_database.py`):** Tests v2 database schema migration, downgrading of placeholder seed entries (Notepad++, FTL, F-Droid) to unverified community status, verified fixture seed entries from actual fixture bytes, structured test evidence requirements, and path traversal prevention.
-6. **Compatibility Database v2 & Provenance (`test_database_v2.py`):** Tests v2 schema validation, provenance tiers (`COMMUNITY_UNTESTED`, `AUTOMATED_TEST`, `MAINTAINER_VERIFIED`), evidence statuses, advanced queries, and community submission workflows.
-7. **Execution Lifecycle Orchestration (`test_orchestrator_lifecycle.py`):** Tests the 9-phase execution lifecycle, native python execution, Wine dry-run orchestration, Bubblewrap fail-closed security (`SecurityViolationError`), non-blocking monotonic deadline streaming timeouts under rapid stdout flood, output truncation cap (512 KB), virtual display lifecycle cleanup on all exit paths, and Freedesktop escaping/unintegration.
+5. **Compatibility Database & Migration (`test_database.py`):** Tests v3 database schema migration, downgrading of unsupported real-application claims (Notepad, 7-Zip, Notepad++, FTL, F-Droid) to unverified community status, verified fixture seed entries from actual fixture bytes, migration failure visibility with `status: "failed"` and error tracking, strict structured test evidence requirements, artifact hash verification, and path traversal prevention.
+6. **Compatibility Database v2 & Provenance (`test_database_v2.py`):** Tests schema validation, provenance tiers (`COMMUNITY_UNTESTED`, `AUTOMATED_TEST`, `MAINTAINER_VERIFIED`), evidence statuses, advanced queries, and community submission workflows.
+7. **Execution Lifecycle Orchestration (`test_orchestrator_lifecycle.py`):** Tests the 9-phase execution lifecycle, native python execution, Wine dry-run orchestration, Bubblewrap fail-closed security (`SecurityViolationError`), non-blocking monotonic deadline streaming timeouts under rapid stdout flood, output truncation cap (512 KB), virtual display lifecycle cleanup on all exit paths, Freedesktop escaping/unintegration, negative timeout rejection, policy timeout clamping, truthful `RLIMIT_AS` resource limits reporting, and pipe closure preventing hanging reader threads.
 8. **Application Inspection Tests (`test_inspector.py`):** Validates raw PE32+, ELF64 (x86_64, AArch64), shell scripts, corrupted files, and nonexistent paths.
 9. **Mach-O Binary Parser Tests (`test_macho.py`):** Validates 32-bit, 64-bit, and Universal Fat Mach-O binary parsing, CPU subtypes, and load command verification.
 10. **Android APK Package Tests (`test_apk.py`):** Validates zip-based APK analysis, dex file counts, manifest presence, and multi-ABI native library detection.
@@ -33,8 +33,8 @@ ZCF enforces strict automated verification. Tests cover both positive execution 
 17. **Automated Remediator Tests (`test_remediator.py`):** Validates distribution-specific package command synthesis (Debian/Ubuntu, Arch, Fedora/RHEL, Alpine, openSUSE), DLL overrides, and wrapper generation.
 18. **Research Engine Tests (`test_research_engine.py`):** Tests the 11-step empirical investigation workflow, hypothesis generation with confidence scoring, REA evidence correlation, and automated knowledge base cataloging.
 19. **Compatibility Sync Tests (`test_sync.py`):** Validates portable JSON bundle export, cryptographic hashing, schema and count validation, atomic import with automatic rollback on error, and untrusted third-party provenance downgrading.
-20. **Bubblewrap Sandbox Tests (`test_sandbox.py`):** Validates Bubblewrap `bwrap` command isolation, read-only application and root binding, exclusion of `/run` writable bind, network namespace policy, fail-closed enforcement when bwrap is missing, and resource control status.
-21. **Security Controller Tests (`test_security.py`):** Validates path traversal defenses, environment secret scrubbing across modes (`minimized_desktop`, `strict_allowlist`, `filter_secrets`), display variable preservation (`XAUTHORITY`), and command injection prevention.
+20. **Bubblewrap Sandbox Tests (`test_sandbox.py`):** Validates Bubblewrap `bwrap` command isolation, strict path canonicalization, rejection of sensitive system directories (`/`, `/etc`, `/usr`, `/run`, `/var`), symlink escape prevention, containment within approved prefix roots, narrow Wayland display socket binding, fail-closed enforcement when bwrap is missing, and resource control status.
+21. **Security Controller Tests (`test_security.py`):** Validates path traversal defenses, environment secret scrubbing across modes (`minimized_desktop`, `strict_allowlist`, `filter_secrets`), display variable preservation (`XAUTHORITY`), default network isolation across all workloads with explicit opt-in, and workload-aware timeout defaults and boundaries.
 
 ---
 
@@ -46,13 +46,13 @@ $env:PYTHONPATH="src"
 $env:ZCF_NON_INTERACTIVE="1"
 python -c "import sys; sys.path.insert(0, 'src'); import unittest; unittest.main(module=None, argv=['unittest', 'discover', '-s', 'tests', '-v'])"
 ```
-**Outcome:** Ran 95 tests in 14.681s — **OK (100% Passed, 0 Failures, 0 Errors)**
+**Outcome:** Ran 108 tests in 37.200s — **OK (100% Passed, 0 Failures, 0 Errors)**
 
-### 2.2 Linux Environment (WSL2 Ubuntu with Xvfb)
+### 2.2 Linux Environment (WSL2 Ubuntu 26.04 with Xvfb)
 ```bash
 PYTHONPATH=src xvfb-run -a python3 -m unittest discover -s tests -v
 ```
-**Outcome:** Ran 95 tests in 17.599s — **OK (100% Passed, 0 Failures, 0 Errors)**
+**Outcome:** Ran 108 tests in 23.523s — **OK (100% Passed, 0 Failures, 0 Errors)**
 
 ---
 
@@ -60,10 +60,10 @@ PYTHONPATH=src xvfb-run -a python3 -m unittest discover -s tests -v
 
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu (xvfb) |
 |---|---|---|
-| Tests Collected | 95 | 95 |
-| Tests Passed | 95 | 95 |
+| Tests Collected | 108 | 108 |
+| Tests Passed | 108 | 108 |
 | Tests Failed | 0 | 0 |
 | Tests Errored | 0 | 0 |
 | Tests Skipped | 0 | 0 |
 | Success Rate | **100%** | **100%** |
-| Execution Duration | 14.68s | 17.60s |
+| Execution Duration | 37.20s | 23.52s |

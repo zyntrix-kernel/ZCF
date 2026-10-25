@@ -10,7 +10,12 @@ import unittest
 
 from zcf.compatibility_db.database import CompatibilityDatabase
 from zcf.compatibility_db.sync import CompatibilitySyncManager
-from zcf.core.models import CompatibilityEntry, CompatibilityStatus
+from zcf.core.models import (
+    CompatibilityEntry,
+    CompatibilityStatus,
+    EvidenceStatus,
+    ProvenanceTier,
+)
 
 
 class TestCompatibilitySync(unittest.TestCase):
@@ -18,6 +23,21 @@ class TestCompatibilitySync(unittest.TestCase):
         self.test_dir = tempfile.mkdtemp()
         self.db = CompatibilityDatabase(storage_dir=os.path.join(self.test_dir, "db"))
         self.sync = CompatibilitySyncManager(self.db)
+        # Add a legitimate maintainer_verified record with a real non-placeholder hash
+        self.db.add_entry(
+            CompatibilityEntry(
+                entry_id="legit_verified_pkg",
+                application_name="Legit App",
+                target_sha256="7c5b6a4d3e2f109876543210abcdef0123456789abcdef0123456789abcdef01",
+                target_format="pe",
+                target_architecture="x86_64",
+                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                last_verified="2026-10-25T00:00:00Z",
+                recommended_runtime="runtime.wine",
+                provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
+                evidence_status=EvidenceStatus.VERIFIED,
+            )
+        )
 
     def tearDown(self):
         shutil.rmtree(self.test_dir, ignore_errors=True)
@@ -32,7 +52,7 @@ class TestCompatibilitySync(unittest.TestCase):
             self.assertEqual(data["bundle_version"], "1.0")
             self.assertGreater(data["entry_count"], 0)
 
-        # Import into fresh database
+        # Import into fresh database with trust_external_provenance=False
         fresh_db_dir = os.path.join(self.test_dir, "fresh_db")
         fresh_db = CompatibilityDatabase(storage_dir=fresh_db_dir)
         fresh_sync = CompatibilitySyncManager(fresh_db)
@@ -41,19 +61,20 @@ class TestCompatibilitySync(unittest.TestCase):
         self.assertGreaterEqual(imported, 1)
 
         # Verify untrusted external entries are safely downgraded from maintainer verified
-        notepad_entry = fresh_db.get_by_id("zcf_entry_notepad_pe")
-        self.assertIsNotNone(notepad_entry)
-        self.assertEqual(notepad_entry.provenance_tier.value, "community_untested")
-        self.assertEqual(notepad_entry.evidence_status.value, "community_reported")
+        downgraded_entry = fresh_db.get_by_id("legit_verified_pkg")
+        self.assertIsNotNone(downgraded_entry)
+        self.assertEqual(downgraded_entry.provenance_tier.value, "community_untested")
+        self.assertEqual(downgraded_entry.evidence_status.value, "community_reported")
 
         # Now test with trust_external_provenance=True
         trusted_db_dir = os.path.join(self.test_dir, "trusted_db")
         trusted_db = CompatibilityDatabase(storage_dir=trusted_db_dir)
         trusted_sync = CompatibilitySyncManager(trusted_db)
         trusted_sync.import_bundle(res_path, trust_external_provenance=True)
-        trusted_entry = trusted_db.get_by_id("zcf_entry_notepad_pe")
+        trusted_entry = trusted_db.get_by_id("legit_verified_pkg")
         self.assertIsNotNone(trusted_entry)
         self.assertEqual(trusted_entry.provenance_tier.value, "maintainer_verified")
+        self.assertEqual(trusted_entry.evidence_status.value, "verified")
 
     def test_import_malformed_entry_fails_and_rolls_back(self):
         """Atomic rollback ensures one malformed record does not partially apply."""

@@ -91,18 +91,24 @@ class TestCompatibilityDatabase(unittest.TestCase):
         self.assertEqual(fdroid.provenance_tier.value, "community_untested")
 
     def test_genuine_fixture_seeds_are_verified(self):
-        """Entries based on actual fixture bytes retain verified automated-test status."""
+        """Entries based on actual fixture bytes retain verified automated-test status while untested headers are honest."""
         pe_fix = self.db.get_by_id("zcf_fixture_pe32plus")
         self.assertIsNotNone(pe_fix)
         self.assertEqual(pe_fix.provenance_tier.value, "automated_test")
         self.assertEqual(pe_fix.evidence_status.value, "verified")
 
-        arm_fix = self.db.get_by_id("zcf_entry_qemu_busybox_arm64")
+        arm_fix = self.db.get_by_id("zcf_fixture_elf64_aarch64")
         self.assertIsNotNone(arm_fix)
         self.assertEqual(arm_fix.provenance_tier.value, "automated_test")
-        self.assertEqual(arm_fix.evidence_status.value, "verified")
+        self.assertEqual(arm_fix.status.value, "untested")
 
-    def test_database_migration_v2_downgrades_existing_legacy_db(self):
+        # Unsupported claims about real applications must be downgraded to untested
+        notepad = self.db.get_by_id("zcf_entry_notepad_pe")
+        self.assertIsNotNone(notepad)
+        self.assertEqual(notepad.provenance_tier.value, "community_untested")
+        self.assertEqual(notepad.status.value, "untested")
+
+    def test_database_migration_v3_downgrades_existing_legacy_db(self):
         """Existing persisted database with placeholder hashes claiming verification is safely migrated."""
         import json
         legacy_dir = tempfile.mkdtemp()
@@ -155,9 +161,27 @@ class TestCompatibilityDatabase(unittest.TestCase):
             # Check db_meta.json
             with open(os.path.join(legacy_dir, "db_meta.json")) as f:
                 meta = json.load(f)
-            self.assertEqual(meta["migration_version"], 2)
+            self.assertEqual(meta["migration_version"], 3)
+            self.assertEqual(meta["status"], "completed")
         finally:
             shutil.rmtree(legacy_dir, ignore_errors=True)
+
+    def test_database_migration_failure_visibility(self):
+        """If a corrupted entry file fails during migration, migration failure is recorded and db_meta reflects status."""
+        import json
+        corrupt_dir = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(corrupt_dir, "corrupt_entry.json"), "w") as f:
+                f.write("{invalid_json: true")
+
+            # Initializing db attempts migration
+            corrupt_db = CompatibilityDatabase(storage_dir=corrupt_dir)
+            with open(os.path.join(corrupt_dir, "db_meta.json")) as f:
+                meta = json.load(f)
+            self.assertEqual(meta["status"], "failed")
+            self.assertTrue(len(meta["errors"]) > 0)
+        finally:
+            shutil.rmtree(corrupt_dir, ignore_errors=True)
 
     def test_verify_profile_requires_structured_evidence(self):
         """Promotion requires structured evidence and rejects placeholder hashes."""
@@ -204,6 +228,65 @@ class TestCompatibilityDatabase(unittest.TestCase):
         updated = self.db.get_by_id("test_struct_app")
         self.assertEqual(updated.evidence_status.value, "verified")
         self.assertEqual(updated.provenance_tier.value, "maintainer_verified")
+
+    def test_verify_profile_contradictory_combinations_and_sha_mismatch(self):
+        """Contradictory status/tier combinations and artifact hash mismatches are rejected."""
+        import hashlib
+        from zcf.core.models import EvidenceStatus, ProvenanceTier
+        real_sha = hashlib.sha256(b"another_test_bin").hexdigest()
+        entry = CompatibilityEntry(
+            entry_id="test_mismatch_app",
+            application_name="Mismatch App",
+            target_sha256=real_sha,
+            target_format="pe",
+            target_architecture="x86_64",
+            status=CompatibilityStatus.UNTESTED,
+            last_verified="2026-10-24T00:00:00Z",
+        )
+        self.db.add_entry(entry)
+
+        # Contradictory: MAINTAINER_VERIFIED tier with COMMUNITY_REPORTED evidence_status
+        with self.assertRaises(DatabaseError):
+            self.db.verify_profile(
+                entry_id="test_mismatch_app",
+                verifier="Lead Tester",
+                provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
+                evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+                structured_evidence={
+                    "test_environment": {"os": "linux"},
+                    "test_procedure": "procedure",
+                    "test_result": {"exit_code": 0, "success": True},
+                },
+            )
+
+        # Contradictory: COMMUNITY_UNTESTED tier claiming VERIFIED evidence_status
+        with self.assertRaises(DatabaseError):
+            self.db.verify_profile(
+                entry_id="test_mismatch_app",
+                verifier="Lead Tester",
+                provenance_tier=ProvenanceTier.COMMUNITY_UNTESTED,
+                evidence_status=EvidenceStatus.VERIFIED,
+                structured_evidence={
+                    "test_environment": {"os": "linux"},
+                    "test_procedure": "procedure",
+                    "test_result": {"exit_code": 0, "success": True},
+                },
+            )
+
+        # Hash mismatch: structured_evidence has wrong artifact_sha256
+        with self.assertRaises(DatabaseError):
+            self.db.verify_profile(
+                entry_id="test_mismatch_app",
+                verifier="Lead Tester",
+                provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
+                evidence_status=EvidenceStatus.VERIFIED,
+                structured_evidence={
+                    "test_environment": {"os": "linux"},
+                    "test_procedure": "procedure",
+                    "test_result": {"exit_code": 0, "success": True},
+                    "artifact_sha256": "0" * 64,
+                },
+            )
 
 
 if __name__ == "__main__":

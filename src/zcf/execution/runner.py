@@ -74,6 +74,7 @@ class ExecutionOrchestrator:
         app_args: Optional[List[str]] = None,
         use_sandbox: bool = True,
         allow_unconfined: bool = False,
+        allow_network: Optional[bool] = None,
         dry_run: bool = False,
         force_headless: bool = False,
         auto_install: bool = False,
@@ -169,8 +170,29 @@ class ExecutionOrchestrator:
             # -------------------------------------------------------------
             # PHASE 6: Apply Security Policy & Environment Sanitization
             # -------------------------------------------------------------
-            security_policy = self.security_controller.build_execution_policy(app, use_sandbox=use_sandbox)
+            security_policy = self.security_controller.build_execution_policy(
+                app, use_sandbox=use_sandbox, allow_network=allow_network
+            )
             sanitized_env = self.security_controller.sanitize_env_vars(raw_env, mode=security_policy.environment_mode)
+
+            # Resolve effective timeout with workload-aware policy
+            security_warnings: List[str] = []
+            effective_timeout: Optional[int] = None
+            if timeout is not None:
+                if timeout < 0:
+                    raise ValueError(f"Execution timeout must be non-negative (received {timeout}s). Use timeout=0 or None for unlimited.")
+                elif timeout == 0:
+                    effective_timeout = None  # Explicit intentional unlimited mode
+                else:
+                    if security_policy.max_timeout_seconds and timeout > security_policy.max_timeout_seconds:
+                        effective_timeout = security_policy.max_timeout_seconds
+                        security_warnings.append(
+                            f"Requested timeout ({timeout}s) exceeds policy maximum ({security_policy.max_timeout_seconds}s); clamped to {effective_timeout}s."
+                        )
+                    else:
+                        effective_timeout = timeout
+            else:
+                effective_timeout = security_policy.default_timeout_seconds
 
             # Build raw command via the adapter
             raw_cmd = adapter.build_command(app, context, app_args)
@@ -184,7 +206,6 @@ class ExecutionOrchestrator:
             if prefix_path:
                 permitted_paths.append(prefix_path)
 
-            security_warnings: List[str] = []
             sandbox_active = False
 
             if use_sandbox:
@@ -198,28 +219,27 @@ class ExecutionOrchestrator:
                         "Sandboxing requested but Bubblewrap ('bwrap') is not available on host. Proceeding unconfined (allow_unconfined=True)."
                     )
                 else:
+                    allowed_roots = [
+                        os.path.realpath(self.prefix_manager.base_dir),
+                        os.path.realpath(os.path.expanduser("~/.local/share/zcf/proton_prefixes")),
+                    ]
+                    if prefix_path:
+                        allowed_roots.append(os.path.realpath(os.path.dirname(os.path.abspath(prefix_path))))
+                        if not dry_run:
+                            os.makedirs(prefix_path, exist_ok=True)
+
                     sb_policy = SandboxPolicy(
                         isolate_network=security_policy.isolate_network,
                         read_only_root=security_policy.read_only_root,
                         disposable_tmp=security_policy.disposable_tmp,
                         read_only_app=True,
+                        enable_x11=True,
+                        enable_wayland=True,
                         max_memory_mb=security_policy.max_memory_mb or 0,
                         max_cpu_seconds=security_policy.max_cpu_seconds or 0,
+                        prefix_path=prefix_path,
+                        allowed_prefix_roots=allowed_roots,
                     )
-                    if prefix_path:
-                        if not dry_run:
-                            os.makedirs(prefix_path, exist_ok=True)
-                        sb_policy.bind_mounts.append(prefix_path)
-
-                    # Safely bind display sockets if present, avoiding mounting entire /run
-                    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
-                    if xdg_runtime and os.path.exists(xdg_runtime):
-                        wayland_sock = os.path.join(xdg_runtime, os.environ.get("WAYLAND_DISPLAY", "wayland-0"))
-                        if os.path.exists(wayland_sock):
-                            sb_policy.bind_mounts.append(wayland_sock)
-
-                    if os.path.exists("/tmp/.X11-unix"):
-                        sb_policy.ro_bind_mounts.append("/tmp/.X11-unix")
 
                     final_cmd = self.sandbox_manager.wrap_command(
                         raw_cmd, working_dir, sb_policy, allow_unconfined=allow_unconfined
@@ -252,6 +272,7 @@ class ExecutionOrchestrator:
             print(f"\n[ZCF Runner] Launching '{app.file_name}' via {adapter.get_name()}...")
             if sandbox_active:
                 print("[ZCF Runner] Security Sandbox: Bubblewrap Active")
+            print(f"[ZCF Runner] Network Access: {'ENABLED (explicit allow_network=True)' if not security_policy.isolate_network else 'ISOLATED (--unshare-net)'}")
             if display_started and display_mgr.process:
                 print(f"[ZCF Runner] Virtual Display: Ephemeral Xvfb Active ({display_mgr.display_str})")
             print("-" * 60)
@@ -262,6 +283,22 @@ class ExecutionOrchestrator:
             output_truncated = False
             exit_code = 0
             timed_out = False
+
+            # Truthful resource limit enforcement status
+            resource_status: Dict[str, Any] = {
+                "mechanism": "posix_rlimit" if os.name != "nt" else "unsupported_on_windows",
+                "applied": False,
+                "virtual_address_space_limit_mb": security_policy.max_memory_mb,
+                "cpu_seconds_limit": security_policy.max_cpu_seconds,
+                "status": "unsupported_on_platform" if os.name == "nt" else "not_configured",
+                "details": (
+                    "POSIX RLIMIT_AS enforces virtual address space limits per-process on Linux. "
+                    "It does not enforce physical RAM (RSS) or aggregate process-tree memory."
+                    if os.name != "nt"
+                    else "POSIX rlimit controls are not supported on Windows."
+                ),
+                "error": None,
+            }
 
             try:
                 popen_kwargs: Dict[str, Any] = {
@@ -288,7 +325,12 @@ class ExecutionOrchestrator:
                                     resource.setrlimit(resource.RLIMIT_AS, (as_limit, as_limit))
                             except Exception:
                                 pass
+
                         popen_kwargs["preexec_fn"] = _preexec_limits
+                        resource_status["applied"] = True
+                        resource_status["status"] = "active"
+
+                security_policy.resource_limits_status = resource_status
 
                 process = subprocess.Popen(final_cmd, **popen_kwargs)
 
@@ -323,7 +365,7 @@ class ExecutionOrchestrator:
                 reader_thread = threading.Thread(target=reader, daemon=True)
                 reader_thread.start()
 
-                deadline = (time.monotonic() + timeout) if timeout else None
+                deadline = (time.monotonic() + effective_timeout) if effective_timeout else None
 
                 while True:
                     # 1. Drain available lines from queue in bounded slices
@@ -390,6 +432,17 @@ class ExecutionOrchestrator:
                                 exit_code = 0
                         else:
                             exit_code = 0
+
+                        try:
+                            if process.stdout and hasattr(process.stdout, "close"):
+                                process.stdout.close()
+                        except Exception:
+                            pass
+                        try:
+                            if process.stderr and hasattr(process.stderr, "close"):
+                                process.stderr.close()
+                        except Exception:
+                            pass
                         break
 
                     if lines_read == 0:
@@ -397,7 +450,7 @@ class ExecutionOrchestrator:
 
                 if timed_out:
                     exit_code = 124
-                    timeout_msg = f"\n[ZCF] Execution timed out after {timeout} seconds. Terminating process group...\n"
+                    timeout_msg = f"\n[ZCF] Execution timed out after {effective_timeout} seconds. Terminating process group...\n"
                     captured_stdout.append(timeout_msg)
                     sys.stdout.write(timeout_msg)
                     sys.stdout.flush()
@@ -429,6 +482,18 @@ class ExecutionOrchestrator:
                                 process.kill()
                             except Exception:
                                 pass
+
+                    # Explicitly close pipes to unblock reader threads if lingering subprocesses held them open
+                    try:
+                        if process.stdout and hasattr(process.stdout, "close"):
+                            process.stdout.close()
+                    except Exception:
+                        pass
+                    try:
+                        if process.stderr and hasattr(process.stderr, "close"):
+                            process.stderr.close()
+                    except Exception:
+                        pass
 
                     try:
                         process.wait(timeout=2)
@@ -516,6 +581,7 @@ class ExecutionOrchestrator:
         force_headless: bool = False,
         auto_install: bool = False,
         timeout: Optional[int] = None,
+        allow_network: Optional[bool] = None,
     ) -> int:
         """
         Executes an application through its optimal compatibility pipeline.
@@ -530,5 +596,6 @@ class ExecutionOrchestrator:
             force_headless=force_headless,
             auto_install=auto_install,
             timeout=timeout,
+            allow_network=allow_network,
         )
         return result.exit_code

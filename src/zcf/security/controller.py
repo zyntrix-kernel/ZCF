@@ -79,7 +79,29 @@ class SecurityController:
         "GITHUB_",
     )
 
-    def __init__(self, allow_root: bool = False, max_timeout_seconds: int = 60):
+    # Workload-aware default timeouts (seconds)
+    # Bounded operations (installers, CLI tools, automated test fixtures) receive strict deadlines.
+    # Interactive desktop applications and games default to None (unconstrained intentional running mode).
+    DEFAULT_TIMEOUT_MAP: Dict[WorkloadType, Optional[int]] = {
+        WorkloadType.INSTALLER: 600,            # 10 minutes maximum for bounded installers
+        WorkloadType.CLI_TOOL: 120,             # 2 minutes maximum for command-line utilities
+        WorkloadType.DESKTOP_GUI: None,         # Interactive GUI: intentional unconstrained mode
+        WorkloadType.GAME: None,                # Interactive Game: intentional unconstrained mode
+        WorkloadType.BACKGROUND_SERVICE: None,  # Background service: intentional unconstrained mode
+        WorkloadType.UNKNOWN: 300,              # 5 minutes default fallback
+    }
+
+    # Workload-aware maximum timeout boundaries for clamping
+    MAX_TIMEOUT_MAP: Dict[WorkloadType, Optional[int]] = {
+        WorkloadType.INSTALLER: 3600,           # 1 hour maximum ceiling for installers
+        WorkloadType.CLI_TOOL: 1800,            # 30 minutes maximum ceiling for CLI tools
+        WorkloadType.DESKTOP_GUI: None,         # Unconstrained
+        WorkloadType.GAME: None,                # Unconstrained
+        WorkloadType.BACKGROUND_SERVICE: None,  # Unconstrained
+        WorkloadType.UNKNOWN: 1800,
+    }
+
+    def __init__(self, allow_root: bool = False, max_timeout_seconds: Optional[int] = None):
         self.allow_root = allow_root
         self.max_timeout_seconds = max_timeout_seconds
 
@@ -155,21 +177,42 @@ class SecurityController:
         return sanitized
 
     def build_execution_policy(
-        self, app: ApplicationDescription, use_sandbox: bool = True
+        self,
+        app: ApplicationDescription,
+        use_sandbox: bool = True,
+        allow_network: Optional[bool] = None,
     ) -> ExecutionSecurityPolicy:
-        """Constructs an observable security policy tailored to the specific workload type."""
+        """
+        Constructs an observable security policy tailored to the specific workload type.
+        Network access is isolated by default across all workloads. Callers must explicitly
+        provide allow_network=True to authorize network connectivity.
+        """
         is_game = app.workload_type == WorkloadType.GAME
         is_installer = app.workload_type == WorkloadType.INSTALLER
 
+        # Explicit network policy: secure by default, explicit opt-in only
+        effective_network_allowed = bool(allow_network)
+
+        default_timeout = self.DEFAULT_TIMEOUT_MAP.get(app.workload_type, 300)
+        max_timeout = (
+            self.max_timeout_seconds
+            if (self.max_timeout_seconds and self.max_timeout_seconds > 0)
+            else self.MAX_TIMEOUT_MAP.get(app.workload_type)
+        )
+
         policy = ExecutionSecurityPolicy(
             workload_type=app.workload_type,
-            isolate_network=not is_game and not is_installer,  # Network open for online games/installers
+            isolate_network=not effective_network_allowed,
             read_only_root=True,
             disposable_tmp=not is_installer,
             allow_root=self.allow_root,
             max_memory_mb=4096 if is_game else 2048,
             max_cpu_seconds=None if is_game else 3600,
-            writable_paths=[],  # Writable paths are restricted to the isolated prefix
+            default_timeout_seconds=default_timeout,
+            max_timeout_seconds=max_timeout,
+            writable_paths=[],
             environment_mode="minimized_desktop",
+            network_mode="bridged_host" if effective_network_allowed else "isolated",
+            resource_limits_status={},
         )
         return policy

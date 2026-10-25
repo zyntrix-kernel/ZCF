@@ -46,6 +46,8 @@ def cmd_run(args):
             use_sandbox=not args.no_sandbox,
             force_headless=args.headless,
             auto_install=args.install_deps,
+            timeout=getattr(args, "timeout", None),
+            allow_network=getattr(args, "allow_network", False),
         )
         sys.exit(code)
     except Exception as e:
@@ -404,6 +406,8 @@ def main(argv: Optional[List[str]] = None):
     p_run.add_argument("artifact_path", help="Path to executable binary")
     p_run.add_argument("app_args", nargs="*", help="Arguments to pass to target application")
     p_run.add_argument("--no-sandbox", action="store_true", help="Disable Bubblewrap container isolation")
+    p_run.add_argument("--allow-network", action="store_true", help="Permit network access in sandbox (defaults to isolated)")
+    p_run.add_argument("--timeout", type=int, default=None, help="Execution timeout in seconds")
     p_run.add_argument("--headless", action="store_true", help="Force virtual Xvfb display server")
     p_run.add_argument("--install-deps", action="store_true", help="Automatically install missing dependencies")
     p_run.set_defaults(func=cmd_run)

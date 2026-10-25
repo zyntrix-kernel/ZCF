@@ -5,7 +5,7 @@
 **Document:** `DELIVERY_REPORT.md`  
 **Date of Completion:** October 25, 2026  
 **Auditor & Lead Autonomous Engineer:** Antigravity Autonomous Engineering Agent  
-**Framework Version:** `v0.2.0` (Production Distro-Grade Release — Milestone 2 Verified)  
+**Framework Version:** `v0.2.0` (Production Distro-Grade Release — Milestone 3 Verified)  
 **Core Framework License:** Apache License, Version 2.0  
 
 ---
@@ -26,7 +26,7 @@ ZCF is a distribution-independent, open-source application compatibility platfor
 7. **Distribution Manual Pages:** Full groff/roff manual page authored and installed (`docs/man/zcf.1`).
 8. **Native Package Distribution:** Tested build script (`packaging/build_distro_packages.sh`) producing verified Debian package (`build/zcf_0.2.0-1_all.deb`), installed and tested via `dpkg -i` on Ubuntu 26.04 LTS.
 9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), dual-runtime Wine and Proton prefix lifecycle management, and 1-click Start Menu / App Grid integration (`zcf integrate`).
-10. **Automated Test Suite & Security Hardening:** 95 unit and integration tests across 21 test suites passing 100% across both Windows 11 host and Ubuntu Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, monotonic deadline-based streaming timeouts, POSIX resource limits, provenance evidence integrity, and non-stub component management.
+10. **Automated Test Suite & Security Hardening:** 108 unit and integration tests across 21 test suites passing 100% across both Windows 11 host and Ubuntu Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, strict writable mount canonicalization and containment, workload-aware execution deadlines, truthful resource limits, provenance evidence integrity, and non-stub component management.
 11. **Continuous Integration & Developer Guides:** GitHub Actions CI matrix workflow (`.github/workflows/ci.yml`), Runtime Adapter Authoring Guide (`docs/ADAPTER_AUTHORING.md`), Compatibility Profile Contribution Guidelines (`docs/CONTRIBUTING_PROFILES.md`), and Security Model Specification (`docs/SECURITY_MODEL.md`).
 
 ---
@@ -290,14 +290,14 @@ man zcf
 
 ## 7. Test Results Summary
 
-| Metric | Windows 11 Pro Host | WSL2 Ubuntu 24.04/26.04 LTS (xvfb) |
+| Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS (xvfb) |
 | :--- | :--- | :--- |
 | **Total Test Files** | 21 | 21 |
-| **Total Test Cases** | 95 | 95 |
-| **Passing Tests** | 95 (100%) | 95 (100%) |
+| **Total Test Cases** | 108 | 108 |
+| **Passing Tests** | 108 (100%) | 108 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
 | **Skipped Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 14.681s | 17.599s |
+| **Execution Duration**| 37.200s | 23.523s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |
 
 ---
@@ -342,6 +342,40 @@ man zcf
    - Strictly rejected paths containing newlines or control characters with `ValueError`.
    - Properly escaped `%` to `%%`, `$` to `\$`, `"` to `\"`, and `\` to `\\` according to Freedesktop Exec specification.
    - Escaped `X-ZCF-Artifact` and ensured symmetric reversible unintegration.
+
+---
+
+## 9. Milestone 3 Implementation Summary: Close the Remaining Security and Evidence Gaps
+
+1. **Priority 0 — Secure Writable Sandbox Mounts (`src/zcf/security/sandbox.py`):**
+   - Implemented strict mount source validation (`validate_writable_mount()`) resolving canonical paths via `os.path.realpath(os.path.abspath(path))`.
+   - Rejects filesystem roots (`/`, `C:\`), sensitive system directories (`/etc`, `/usr`, `/run`, `/var`, `/boot`, `/root`, `/sys`, `/proc`, `/dev`, `/opt`, `/srv`), user home roots (`~`), and credential stores (`~/.ssh`, `~/.gnupg`, `~/.pki`).
+   - Identifies and blocks symlink traversal attacks attempting to escape approved roots.
+   - Confines all writable mounts to approved application prefix storage roots (`allowed_prefix_roots`).
+   - Narrowly binds Wayland display sockets (`$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`) exclusively as individual sockets under `enable_wayland`, completely avoiding mounting `/run` or `$XDG_RUNTIME_DIR` writable.
+   - Emits actionable, sanitized error messages that prevent leaking private host paths.
+
+2. **Priority 0 — Truthful Execution Timeouts & Resource Limits (`src/zcf/security/controller.py`, `src/zcf/execution/runner.py`):**
+   - Implemented workload-aware default timeout policy:
+     - Installers (`WorkloadType.INSTALLER`): 600s default; 3600s maximum ceiling.
+     - CLI Tools (`WorkloadType.CLI_TOOL`): 120s default; 1800s maximum ceiling.
+     - Interactive Applications & Games (`WorkloadType.DESKTOP_GUI`, `WorkloadType.GAME`): unconstrained default (`timeout = None`).
+   - Validates boundaries: negative timeouts (`timeout < 0`) raise `ValueError`; `timeout = 0` provides an explicit intentional unlimited mode; requests exceeding policy maximums are safely clamped with recorded warnings.
+   - Truthful resource reporting: explicitly documents that Linux POSIX `RLIMIT_AS` controls per-process virtual address space and does not measure physical RSS or aggregate process trees.
+   - Clean stream closure: explicitly closes `process.stdout` and `process.stderr` upon deadline expiration to unblock reader threads if lingering subprocesses held descriptors open.
+
+3. **Priority 0 — Repair Compatibility Database Claims (`src/zcf/compatibility_db/`):**
+   - Dynamically recomputes synthetic benchmark hashes (`compute_fixture_sha256()`) from actual disk bytes (`valid_pe32plus.exe`, `valid_elf64_aarch64`, `valid_app.apk`).
+   - Honestly renames synthetic fixtures (`zcf_fixture_elf64_aarch64` as "Synthetic ELF64 AArch64 Header Benchmark Fixture", marked `UNTESTED` rather than pretending to run BusyBox).
+   - Downgrades unsubstantiated claims for real-world applications (Windows Notepad, 7-Zip, Notepad++, FTL, F-Droid) to `COMMUNITY_UNTESTED` and `UNTESTED`.
+   - Enforces strict verification promotion schema: `verify_profile()` requires structured evidence with `test_environment`, `test_procedure`, `test_result` containing `exit_code` and `success`, matching `artifact_sha256`, and non-contradictory status/tier combinations.
+   - Idempotent versioned migration (`v3`): tracks `migration_errors` and only marks migration completed (`status: "completed"`) if zero records failed; corrupt files leave `status: "failed"` with recorded error details for visibility and retry.
+   - Prevents re-promotion during default seeding if records already exist.
+
+4. **Priority 1 — Fail-Closed Network Isolation Policy:**
+   - Default `isolate_network = True` (`--unshare-net`) across ALL workloads, including games and installers.
+   - Explicit caller opt-in (`allow_network = True` or `--allow-network`) required to authorize bridged host network connectivity.
+   - Complete consistency between user-facing policy indicators (`network_mode: "isolated"` vs `"bridged_host"`) and Bubblewrap container arguments.
 
 ---
 

@@ -201,14 +201,18 @@ class ValidationResult:
 @dataclass
 class ExecutionSecurityPolicy:
     workload_type: WorkloadType = WorkloadType.DESKTOP_GUI
-    isolate_network: bool = False
+    isolate_network: bool = True
     read_only_root: bool = True
     disposable_tmp: bool = False
     allow_root: bool = False
     max_memory_mb: Optional[int] = None
     max_cpu_seconds: Optional[int] = None
+    default_timeout_seconds: Optional[int] = None
+    max_timeout_seconds: Optional[int] = None
     writable_paths: List[str] = field(default_factory=list)
     environment_mode: str = "minimized_desktop"
+    network_mode: str = "isolated"
+    resource_limits_status: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

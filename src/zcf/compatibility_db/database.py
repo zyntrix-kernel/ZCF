@@ -6,6 +6,7 @@ Persists, indexes, queries, and validates versioned evidence-backed compatibilit
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -20,6 +21,27 @@ from zcf.core.models import (
     EvidenceStatus,
     ProvenanceTier,
 )
+
+
+def compute_fixture_sha256(filename: str, fallback: str) -> str:
+    """Computes SHA-256 directly from the synthetic fixture file on disk if available."""
+    search_dirs = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "fixtures", "synthetic"),
+        os.path.join(os.getcwd(), "fixtures", "synthetic"),
+        "/usr/share/zcf/fixtures/synthetic",
+    ]
+    for d in search_dirs:
+        target = os.path.join(d, filename)
+        if os.path.isfile(target):
+            try:
+                h = hashlib.sha256()
+                with open(target, "rb") as f:
+                    while chunk := f.read(65536):
+                        h.update(chunk)
+                return h.hexdigest()
+            except Exception:
+                pass
+    return fallback
 
 
 def is_placeholder_hash(sha: str) -> bool:
@@ -44,6 +66,7 @@ class CompatibilityDatabase:
     """Manages local versioned JSON compatibility records with provenance tiers."""
 
     SCHEMA_VERSION = "2.0"
+    CURRENT_MIGRATION_VERSION = 3
 
     def __init__(self, storage_dir: Optional[str] = None):
         self.storage_dir = storage_dir or os.path.expanduser("~/.zcf/compat_db")
@@ -54,8 +77,9 @@ class CompatibilityDatabase:
     def _migrate_database(self):
         """
         Executes versioned, idempotent database migration.
-        Safely identifies legacy seed entries with synthetic placeholder hashes
+        Identifies legacy seed entries with synthetic placeholder hashes or unsupported claims
         and downgrades them to unverified community status, preserving legitimate user data.
+        Tracks any migration errors: if any record fails, migration is not marked completed.
         """
         meta_path = os.path.join(self.storage_dir, "db_meta.json")
         current_migration = 0
@@ -67,9 +91,19 @@ class CompatibilityDatabase:
             except Exception:
                 current_migration = 0
 
-        if current_migration < 2:
+        if current_migration < self.CURRENT_MIGRATION_VERSION:
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            migration_errors: List[str] = []
+
             if os.path.exists(self.storage_dir):
+                # Clean up legacy busybox file if it exists and migrate to honest fixture
+                legacy_busybox = os.path.join(self.storage_dir, "zcf_entry_qemu_busybox_arm64.json")
+                if os.path.exists(legacy_busybox):
+                    try:
+                        os.remove(legacy_busybox)
+                    except Exception as e:
+                        migration_errors.append(f"Failed to remove legacy entry file {legacy_busybox}: {e}")
+
                 for fname in os.listdir(self.storage_dir):
                     if fname.endswith(".json") and fname != "db_meta.json":
                         fpath = os.path.join(self.storage_dir, fname)
@@ -77,62 +111,86 @@ class CompatibilityDatabase:
                             with open(fpath, "r", encoding="utf-8") as f:
                                 data = json.load(f)
                             entry = self._dict_to_entry(data)
-                            if is_placeholder_hash(entry.target_sha256):
-                                # If it claimed verified status or tier, downgrade it
+                            modified = False
+
+                            is_placeholder = is_placeholder_hash(entry.target_sha256)
+                            is_unsupported_claim = entry.entry_id in (
+                                "zcf_entry_notepad_pe",
+                                "zcf_entry_7zip_pe",
+                                "zcf_entry_notepadplusplus",
+                                "zcf_entry_ftl_proton",
+                                "zcf_entry_fdroid_waydroid",
+                            )
+
+                            if is_placeholder or is_unsupported_claim:
                                 if (
                                     entry.provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST)
                                     or entry.evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED)
+                                    or entry.status == CompatibilityStatus.VERIFIED_COMPATIBLE
                                 ):
                                     entry.provenance_tier = ProvenanceTier.COMMUNITY_UNTESTED
                                     entry.evidence_status = EvidenceStatus.COMMUNITY_REPORTED
-                                    if entry.status == CompatibilityStatus.VERIFIED_COMPATIBLE:
-                                        entry.status = CompatibilityStatus.UNTESTED
+                                    entry.status = CompatibilityStatus.UNTESTED
                                     entry.verification_history.append(
                                         {
-                                            "action": "downgraded_by_migration_v2",
-                                            "reason": "Synthetic placeholder hash cannot claim verified provenance.",
+                                            "action": "downgraded_by_migration_v3",
+                                            "reason": "Unsubstantiated claims and placeholder hashes must not claim verified provenance.",
                                             "timestamp": now_iso,
                                         }
                                     )
-                                    with open(fpath, "w", encoding="utf-8") as f:
-                                        json.dump(entry.to_dict(), f, indent=2)
-                        except Exception:
-                            continue
+                                    modified = True
 
-            try:
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump({"schema_version": self.SCHEMA_VERSION, "migration_version": 2}, f, indent=2)
-            except Exception:
-                pass
+                            if modified:
+                                with open(fpath, "w", encoding="utf-8") as f:
+                                    json.dump(entry.to_dict(), f, indent=2)
+                        except Exception as e:
+                            migration_errors.append(f"Failed to migrate record {fname}: {str(e)}")
+
+            if not migration_errors:
+                try:
+                    with open(meta_path, "w", encoding="utf-8") as f:
+                        json.dump(
+                            {
+                                "schema_version": self.SCHEMA_VERSION,
+                                "migration_version": self.CURRENT_MIGRATION_VERSION,
+                                "status": "completed",
+                                "last_migrated": now_iso,
+                            },
+                            f,
+                            indent=2,
+                        )
+                except Exception:
+                    pass
+            else:
+                try:
+                    with open(meta_path, "w", encoding="utf-8") as f:
+                        json.dump(
+                            {
+                                "schema_version": self.SCHEMA_VERSION,
+                                "migration_version": current_migration,
+                                "status": "failed",
+                                "errors": migration_errors,
+                                "last_attempt": now_iso,
+                            },
+                            f,
+                            indent=2,
+                        )
+                except Exception:
+                    pass
 
     def _seed_default_entries(self):
-        """Seeds initial verified benchmark entries if missing."""
+        """Seeds initial honest benchmark entries if missing without re-promoting existing records."""
+        pe_sha = compute_fixture_sha256("valid_pe32plus.exe", "69db5225abe4d3faf6b1a006b809f8e252b6425f39e858de1a21465e4cde045b")
+        arm_sha = compute_fixture_sha256("valid_elf64_aarch64", "4be20eaf6c9a5d0231630b1baa5459ea6ab96284dd3b97f9d925491dcf4cd830")
+        apk_sha = compute_fixture_sha256("valid_app.apk", "fb6bde405b0de299462eac1596ef4a6e72f64690676b7e3046436846025175ce")
+
         seed_entries = [
-            # Real verified benchmark fixture entries using actual repository fixture bytes
-            CompatibilityEntry(
-                entry_id="zcf_entry_notepad_pe",
-                application_name="Windows Notepad",
-                version="10.0",
-                target_sha256="15cd209c995b7d3009c91ca40892d5b8f1fb162f3e5f10716642ea278e8e0d7b",
-                target_format="pe",
-                target_architecture="x86_64",
-                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
-                last_verified="2026-10-24T12:00:00Z",
-                recommended_runtime="runtime.wine",
-                verified_environment={"os": "ubuntu", "kernel": "6.18", "runner_version": "wine-9.0"},
-                workarounds=[],
-                diagnostic_signatures=[],
-                provenance={"authority": "maintainer-verified", "contributor": "Zyntrix Labs"},
-                schema_version=self.SCHEMA_VERSION,
-                provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
-                evidence_status=EvidenceStatus.VERIFIED,
-                test_procedure="Clean prefix initialization, launched notepad.exe, verified GUI window rendering and clean exit.",
-            ),
+            # Real verified benchmark fixture entries using dynamically computed actual repository fixture bytes
             CompatibilityEntry(
                 entry_id="zcf_fixture_pe32plus",
                 application_name="Synthetic Windows PE32+ Benchmark Fixture",
                 version="1.0",
-                target_sha256="69db5225abe4d3faf6b1a006b809f8e252b6425f39e858de1a21465e4cde045b",
+                target_sha256=pe_sha,
                 target_format="pe",
                 target_architecture="x86_64",
                 status=CompatibilityStatus.VERIFIED_COMPATIBLE,
@@ -148,13 +206,13 @@ class CompatibilityDatabase:
                 test_procedure="Verified execution of valid_pe32plus.exe synthetic fixture in isolated Wine prefix.",
             ),
             CompatibilityEntry(
-                entry_id="zcf_entry_qemu_busybox_arm64",
-                application_name="Busybox Static AArch64 Fixture",
-                version="1.36.1",
-                target_sha256="4be20eaf6c9a5d0231630b1baa5459ea6ab96284dd3b97f9d925491dcf4cd830",
+                entry_id="zcf_fixture_elf64_aarch64",
+                application_name="Synthetic ELF64 AArch64 Header Benchmark Fixture",
+                version="1.0",
+                target_sha256=arm_sha,
                 target_format="elf",
                 target_architecture="arm64",
-                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                status=CompatibilityStatus.UNTESTED,
                 last_verified="2026-10-25T00:00:00Z",
                 recommended_runtime="runtime.qemu-user",
                 verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "qemu-10.2"},
@@ -163,14 +221,14 @@ class CompatibilityDatabase:
                 provenance={"authority": "automated-ci", "contributor": "Zyntrix Labs"},
                 schema_version=self.SCHEMA_VERSION,
                 provenance_tier=ProvenanceTier.AUTOMATED_TEST,
-                evidence_status=EvidenceStatus.VERIFIED,
-                test_procedure="Ran valid_elf64_aarch64 synthetic fixture under qemu-aarch64 emulation.",
+                evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+                test_procedure="Synthetic ELF64 header validation benchmark fixture.",
             ),
             CompatibilityEntry(
                 entry_id="zcf_fixture_android_apk",
                 application_name="Synthetic Android APK Benchmark Fixture",
                 version="1.0",
-                target_sha256="fb6bde405b0de299462eac1596ef4a6e72f64690676b7e3046436846025175ce",
+                target_sha256=apk_sha,
                 target_format="archive",
                 target_architecture="universal",
                 status=CompatibilityStatus.VERIFIED_COMPATIBLE,
@@ -185,7 +243,26 @@ class CompatibilityDatabase:
                 evidence_status=EvidenceStatus.VERIFIED,
                 test_procedure="Verified valid_app.apk synthetic package structure and Waydroid deployment lifecycle.",
             ),
-            # Downgraded Community Demo Profiles (Unsubstantiated placeholder hashes)
+            # Downgraded Community Demo Profiles (Unsubstantiated claims honestly marked untested)
+            CompatibilityEntry(
+                entry_id="zcf_entry_notepad_pe",
+                application_name="Windows Notepad",
+                version="10.0",
+                target_sha256="15cd209c995b7d3009c91ca40892d5b8f1fb162f3e5f10716642ea278e8e0d7b",
+                target_format="pe",
+                target_architecture="x86_64",
+                status=CompatibilityStatus.UNTESTED,
+                last_verified="2026-10-24T12:00:00Z",
+                recommended_runtime="runtime.wine",
+                verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "wine-9.0"},
+                workarounds=[],
+                diagnostic_signatures=[],
+                provenance={"authority": "community-contributor", "contributor": "Community Sample"},
+                schema_version=self.SCHEMA_VERSION,
+                provenance_tier=ProvenanceTier.COMMUNITY_UNTESTED,
+                evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+                test_procedure="Unverified community profile. Requires local verification with actual binary hash.",
+            ),
             CompatibilityEntry(
                 entry_id="zcf_entry_7zip_pe",
                 application_name="7-Zip File Archiver",
@@ -270,7 +347,8 @@ class CompatibilityDatabase:
             ),
         ]
         for entry in seed_entries:
-            if not self.get_by_id(entry.entry_id):
+            # Prevent re-promoting or overwriting existing user/downgraded records
+            if not self.get_by_id(entry.entry_id) and not self.get_by_sha256(entry.target_sha256):
                 self.add_entry(entry)
 
     def _resolve_entry_path(self, entry_id: str) -> str:
@@ -418,7 +496,8 @@ class CompatibilityDatabase:
     ) -> bool:
         """
         Promotes an entry after successful independent test reproduction with structured evidence.
-        Rejects promotion of placeholder hashes or claims lacking required execution metrics.
+        Rejects promotion of placeholder hashes, claims lacking required execution metrics,
+        mismatched target hashes, or contradictory status/tier combinations.
         """
         entry = self.get_by_id(entry_id)
         if not entry:
@@ -427,15 +506,48 @@ class CompatibilityDatabase:
         if is_placeholder_hash(entry.target_sha256):
             raise DatabaseError("Cannot promote an entry with a synthetic placeholder hash to verified status.")
 
+        # Non-contradictory status/tier combinations
+        if provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST):
+            if evidence_status not in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED):
+                raise DatabaseError(
+                    f"Contradictory evidence configuration: Provenance tier '{provenance_tier.value}' "
+                    f"requires verified or reproduced evidence status (got '{evidence_status.value}')."
+                )
+        elif provenance_tier == ProvenanceTier.COMMUNITY_UNTESTED:
+            if evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED):
+                raise DatabaseError(
+                    f"Contradictory evidence configuration: Community untested tier cannot claim "
+                    f"verified evidence status '{evidence_status.value}'."
+                )
+
         if not structured_evidence or not isinstance(structured_evidence, dict):
             raise DatabaseError("Verification promotion requires structured test evidence (environment, procedure, results).")
 
         if not structured_evidence.get("test_environment") or not structured_evidence.get("test_procedure"):
             raise DatabaseError("Structured evidence must include non-empty 'test_environment' and 'test_procedure'.")
 
+        test_result = structured_evidence.get("test_result") or structured_evidence.get("test_results")
+        if not test_result or not isinstance(test_result, dict):
+            raise DatabaseError("Structured evidence must include a non-empty 'test_result' object.")
+
+        if "exit_code" not in test_result:
+            raise DatabaseError("Structured evidence 'test_result' must contain an 'exit_code'.")
+
+        if "success" not in test_result:
+            test_result["success"] = (test_result["exit_code"] == 0)
+
+        # Check artifact hash match if present in structured evidence
+        ev_sha = structured_evidence.get("artifact_sha256")
+        if ev_sha and str(ev_sha).lower() != entry.target_sha256.lower():
+            raise DatabaseError(
+                f"Artifact SHA-256 mismatch in structured evidence: expected {entry.target_sha256}, got {ev_sha}."
+            )
+
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         entry.evidence_status = evidence_status
         entry.provenance_tier = provenance_tier
+        if test_result.get("success") is True and entry.status != CompatibilityStatus.VERIFIED_COMPATIBLE:
+            entry.status = CompatibilityStatus.VERIFIED_COMPATIBLE
         entry.last_verified = now_iso
         entry.verified_environment = structured_evidence.get("test_environment", entry.verified_environment)
         entry.test_procedure = str(structured_evidence.get("test_procedure", entry.test_procedure))
