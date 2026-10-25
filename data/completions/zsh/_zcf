@@ -31,18 +31,36 @@ _zcf() {
             ;;
         args)
             case $words[1] in
+                console|web)
+                    _arguments \
+                        '--host=[Host interface to bind]:host:' \
+                        '--port=[Port to listen on]:port:' \
+                        '--allow-remote[Permit binding to remote network interfaces]' \
+                        '--no-browser[Do not automatically launch web browser]'
+                    ;;
                 run)
                     _arguments \
                         '--sandbox[Enforce Bubblewrap sandboxing]' \
                         '--no-sandbox[Disable sandboxing]' \
+                        '--allow-unconfined[Permit unconfined execution if sandbox unavailable]' \
+                        '--dry-run[Perform dry run only]' \
+                        '--allow-network[Permit network access in sandbox]' \
+                        '--timeout=[Execution timeout in seconds]:timeout:' \
                         '--headless[Force execution under virtual Xvfb display]' \
                         '--install-deps[Automatically install missing package dependencies]' \
                         '*:application binary:_files'
                     ;;
-                inspect|plan|test)
+                inspect|plan)
                     _arguments \
                         '--json[Output JSON]' \
+                        '*:target file:_files'
+                    ;;
+                test)
+                    _arguments \
                         '--dry-run[Perform dry run only]' \
+                        '--record[Record outcome into compatibility knowledge base]' \
+                        '--contributor=[Contributor attribution name]:name:' \
+                        '--timeout=[Execution timeout in seconds]:timeout:' \
                         '*:target file:_files'
                     ;;
                 diag)

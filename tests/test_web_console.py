@@ -1,6 +1,8 @@
 """
 Unit tests for ZCF Web Console Server and REST API.
 Verifies loopback interface, security headers, endpoints, and JSON models.
+Includes comprehensive tests for DNS rebinding, CSRF protection, payload limits,
+path validation, profile querying, test execution, and remote binding restrictions.
 """
 
 from __future__ import annotations
@@ -22,13 +24,11 @@ class TestWebConsole(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         os.environ["ZCF_WEB_QUIET"] = "1"
-        # Pick a non-default test port to avoid conflicting with active servers
         cls.port = 8789
         cls.host = "127.0.0.1"
         cls.base_url = f"http://{cls.host}:{cls.port}"
         cls.console = ZCFWebConsole(host=cls.host, port=cls.port)
         cls.console.start(blocking=False)
-        # Allow thread to bind socket
         time.sleep(0.4)
 
     @classmethod
@@ -39,20 +39,29 @@ class TestWebConsole(unittest.TestCase):
         self.fixtures_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "fixtures", "synthetic"))
         self.pe_fixture = os.path.join(self.fixtures_dir, "valid_pe32plus.exe")
 
-    def _http_get(self, path: str):
+    def _http_get(self, path: str, headers: dict = None):
         url = f"{self.base_url}{path}"
-        req = urllib.request.Request(url)
+        req_headers = {"Host": f"{self.host}:{self.port}"}
+        if headers:
+            req_headers.update(headers)
+        req = urllib.request.Request(url, headers=req_headers)
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = resp.read()
             return resp.status, resp.headers, data
 
-    def _http_post(self, path: str, payload: dict):
+    def _http_post(self, path: str, payload: dict, headers: dict = None):
         url = f"{self.base_url}{path}"
         data_bytes = json.dumps(payload).encode("utf-8")
+        req_headers = {
+            "Content-Type": "application/json",
+            "Host": f"{self.host}:{self.port}",
+        }
+        if headers:
+            req_headers.update(headers)
         req = urllib.request.Request(
             url,
             data=data_bytes,
-            headers={"Content-Type": "application/json"},
+            headers=req_headers,
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=3) as resp:
@@ -94,6 +103,19 @@ class TestWebConsole(unittest.TestCase):
         self.assertIn("entry_id", first)
         self.assertIn("target_sha256", first)
 
+    def test_get_api_db_profile_detail(self):
+        """Verifies GET /api/db/profile?id=<id> returns complete evidence bundle."""
+        status, _, body = self._http_get("/api/db")
+        data = json.loads(body.decode("utf-8"))
+        entry_id = data[0]["entry_id"]
+
+        status, _, body = self._http_get(f"/api/db/profile?id={entry_id}")
+        self.assertEqual(status, 200)
+        detail = json.loads(body.decode("utf-8"))
+        self.assertEqual(detail["entry_id"], entry_id)
+        self.assertIn("provenance_tier", detail)
+        self.assertIn("target_sha256", detail)
+
     def test_get_api_prefixes(self):
         """Verifies GET /api/prefixes returns Wine and Proton prefix containers."""
         status, headers, body = self._http_get("/api/prefixes")
@@ -134,6 +156,25 @@ class TestWebConsole(unittest.TestCase):
         self.assertIn("selected_runtime_name", data)
         self.assertIn("confidence_score", data)
 
+    def test_post_api_test_execution_dry_run(self):
+        """Verifies POST /api/test executes dry-run validation."""
+        if not os.path.exists(self.pe_fixture):
+            self.skipTest("Synthetic PE fixture not generated")
+        status, _, body = self._http_post("/api/test", {"path": self.pe_fixture, "dry_run": True})
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertTrue(data.get("dry_run"))
+        self.assertIn("exit_code", data)
+        self.assertIn("runtime", data)
+
+    def test_post_api_prefixes_cleanup(self):
+        """Verifies POST /api/prefixes/cleanup safely cleans stale prefixes."""
+        status, _, body = self._http_post("/api/prefixes/cleanup", {"max_age_days": 14})
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertTrue(data.get("success"))
+        self.assertIn("total", data)
+
     def test_post_api_diag(self):
         """Verifies POST /api/diag analyzes error log text."""
         log_sample = "err:module:import_dll Library D3DX9_43.dll not found\nerror while loading shared libraries: libvulkan.so.1: cannot open shared object file"
@@ -147,10 +188,106 @@ class TestWebConsole(unittest.TestCase):
         self.assertIn("wine_dll_not_found", signatures)
         self.assertIn("missing_shared_library", signatures)
 
+    # -------------------------------------------------------------
+    # SECURITY & REJECTION TESTS
+    # -------------------------------------------------------------
+
+    def test_security_rejects_invalid_host_header(self):
+        """Verifies that requests with an unauthorized Host header (DNS rebinding) are rejected with 403."""
+        url = f"{self.base_url}/api/env"
+        req = urllib.request.Request(url, headers={"Host": "attacker.evil.com"})
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=3)
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_security_rejects_cross_site_fetch(self):
+        """Verifies that cross-site POST requests (Sec-Fetch-Site: cross-site) are rejected with 403."""
+        url = f"{self.base_url}/api/diag"
+        data_bytes = json.dumps({"log": "sample"}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "Host": f"{self.host}:{self.port}",
+                "Sec-Fetch-Site": "cross-site",
+            },
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=3)
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_security_rejects_external_origin(self):
+        """Verifies that POST requests from external browser origins are rejected with 403."""
+        url = f"{self.base_url}/api/diag"
+        data_bytes = json.dumps({"log": "sample"}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "Host": f"{self.host}:{self.port}",
+                "Origin": "http://evil-website.com",
+            },
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=3)
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_security_rejects_directory_for_binary_inspection(self):
+        """Verifies that passing a directory instead of a regular file returns 404."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            url = f"{self.base_url}/api/inspect"
+            data_bytes = json.dumps({"path": temp_dir}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data_bytes,
+                headers={
+                    "Content-Type": "application/json",
+                    "Host": f"{self.host}:{self.port}",
+                },
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=3)
+            self.assertEqual(ctx.exception.code, 404)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_security_rejects_oversized_payload(self):
+        """Verifies that requests exceeding the 2MB payload cap are rejected with 413."""
+        url = f"{self.base_url}/api/diag"
+        oversized = "x" * (2 * 1024 * 1024 + 100)
+        data_bytes = json.dumps({"log": oversized}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "Host": f"{self.host}:{self.port}",
+            },
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=3)
+        self.assertEqual(ctx.exception.code, 413)
+
+    def test_security_rejects_non_loopback_without_allow_remote(self):
+        """Verifies that attempting to bind to non-loopback interface raises ValueError unless allow_remote=True."""
+        with self.assertRaises(ValueError):
+            ZCFWebConsole(host="192.168.1.100", port=9999, allow_remote=False)
+
+        # But succeeds when explicitly authorized
+        allowed_console = ZCFWebConsole(host="192.168.1.100", port=9999, allow_remote=True)
+        self.assertEqual(allowed_console.host, "192.168.1.100")
+
     def test_not_found_endpoint(self):
         """Verifies nonexistent routes return 404 JSON error."""
         url = f"{self.base_url}/api/nonexistent"
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(url, headers={"Host": f"{self.host}:{self.port}"})
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req, timeout=3)
         self.assertEqual(ctx.exception.code, 404)

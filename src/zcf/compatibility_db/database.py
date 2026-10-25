@@ -450,10 +450,12 @@ class CompatibilityDatabase:
         workarounds: Optional[List[Dict[str, Any]]] = None,
         version: Optional[str] = None,
         env: Optional[EnvironmentReport] = None,
+        provenance_tier: Optional[ProvenanceTier] = None,
+        evidence_status: Optional[EvidenceStatus] = None,
     ) -> CompatibilityEntry:
         """
         Contributor workflow: Creates a structured, schema-compliant community compatibility entry.
-        Defaults to ProvenanceTier.COMMUNITY_UNTESTED and EvidenceStatus.COMMUNITY_REPORTED.
+        Defaults to ProvenanceTier.COMMUNITY_UNTESTED and EvidenceStatus.COMMUNITY_REPORTED (or UNTESTED if status is UNTESTED).
         """
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "_", app.file_name.lower())[:20]
@@ -467,6 +469,11 @@ class CompatibilityDatabase:
                 "kernel": env.kernel_version,
                 "arch": env.architecture,
             }
+
+        tier = provenance_tier or ProvenanceTier.COMMUNITY_UNTESTED
+        ev_status = evidence_status or (
+            EvidenceStatus.UNTESTED if status == CompatibilityStatus.UNTESTED else EvidenceStatus.COMMUNITY_REPORTED
+        )
 
         entry = CompatibilityEntry(
             entry_id=entry_id,
@@ -483,8 +490,8 @@ class CompatibilityDatabase:
             diagnostic_signatures=[],
             provenance={"authority": "community-contributor", "contributor": contributor_name},
             schema_version=self.SCHEMA_VERSION,
-            provenance_tier=ProvenanceTier.COMMUNITY_UNTESTED,
-            evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+            provenance_tier=tier,
+            evidence_status=ev_status,
             test_procedure=test_procedure,
             verification_history=[
                 {

@@ -13,16 +13,28 @@ _zcf_completions() {
     fi
 
     case "${words[1]}" in
+        console|web)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--host --port --allow-remote --no-browser" -- "$cur") )
+            fi
+            ;;
         run)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--sandbox --no-sandbox --headless --install-deps --json" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--sandbox --no-sandbox --allow-unconfined --dry-run --allow-network --timeout --headless --install-deps" -- "$cur") )
             else
                 _filedir
             fi
             ;;
-        inspect|plan|test)
+        inspect|plan)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--json --dry-run" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--json" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        test)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--dry-run --record --contributor --timeout" -- "$cur") )
             else
                 _filedir
             fi

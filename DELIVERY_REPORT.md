@@ -26,7 +26,7 @@ ZCF is a distribution-independent, open-source application compatibility platfor
 7. **Distribution Manual Pages:** Full groff/roff manual page authored and installed (`docs/man/zcf.1`).
 8. **Native Package Distribution:** Tested build script (`packaging/build_distro_packages.sh`) producing verified Debian package (`build/zcf_0.2.0-1_all.deb`), installed and tested via `dpkg -i` on Ubuntu 26.04 LTS.
 9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), dual-runtime Wine and Proton prefix lifecycle management, and 1-click Start Menu / App Grid integration (`zcf integrate`).
-10. **Automated Test Suite & Security Hardening:** 127 unit and integration tests across 23 test suites passing 100% across both Windows 11 host and Ubuntu Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, strict writable mount canonicalization, ancestor symlink validation and containment, workload-aware execution deadlines, truthful resource limits, provenance evidence integrity, web console REST API endpoints, symmetric desktop integration lifecycle, and non-stub component management.
+10. **Automated Test Suite & Security Hardening:** 138 unit and integration tests across 23 test suites passing 100% across both Windows 11 host and Ubuntu Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, strict writable mount canonicalization, ancestor symlink validation and containment, workload-aware execution deadlines, truthful resource limits, provenance evidence integrity, web console REST API endpoints, DNS rebinding & CSRF defenses, symmetric desktop integration lifecycle, and non-stub component management.
 11. **Continuous Integration & Developer Guides:** GitHub Actions CI matrix workflow (`.github/workflows/ci.yml`), Runtime Adapter Authoring Guide (`docs/ADAPTER_AUTHORING.md`), Compatibility Profile Contribution Guidelines (`docs/CONTRIBUTING_PROFILES.md`), and Security Model Specification (`docs/SECURITY_MODEL.md`).
 
 ---
@@ -298,11 +298,11 @@ man zcf
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS (xvfb) |
 | :--- | :--- | :--- |
 | **Total Test Files** | 23 | 23 |
-| **Total Test Cases** | 127 | 127 |
-| **Passing Tests** | 127 (100%) | 127 (100%) |
+| **Total Test Cases** | 138 | 138 |
+| **Passing Tests** | 138 (100%) | 138 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
 | **Skipped Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 32.531s | 35.402s |
+| **Execution Duration**| 27.442s | 28.019s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |
 
 ---
@@ -420,9 +420,17 @@ man zcf
    - Updated user manual page `docs/man/zcf.1`.
 
 7. **Regression Test Verification:**
-   - 127 total tests across 23 test suites passing 100% on Windows 11 host and Ubuntu Linux under Xvfb.
-   - New test suites: `tests/test_web_console.py` (9 tests) and `tests/test_cli_workflows.py` (4 tests).
+   - 138 total tests across 23 test suites passing 100% on Windows 11 host and Ubuntu Linux under Xvfb.
+   - Comprehensive test suites: `tests/test_web_console.py` (18 tests) and `tests/test_cli_workflows.py` (6 tests).
    - Expanded suites: `tests/test_database.py` (+1 test) and `tests/test_desktop_ux.py` (+1 test).
+
+8. **God Mode Release Engineering & Blocker Closure:**
+   - **CI Blocker Resolution:** Traced and resolved the CLI recording regression on headless Linux runners where Wine is not pre-installed. The planner and runner now rigorously distinguish between a plan that legitimately blocks live execution, a dry-run that validates the orchestration path without process execution, a successful live test, a failed test, and recording an unexecuted attempt versus recording proof of compatibility. Unexecuted dry-run tests record honest `CompatibilityStatus.UNTESTED` and `EvidenceStatus.UNTESTED` with full provenance transparency.
+   - **Web Console Security Hardening:** Eliminated DOM-based cross-site scripting (DOM XSS) by implementing strict entity escaping (`escapeHtml`) across all dynamically rendered telemetry, database profiles, prefixes, and diagnostic findings.
+   - **DNS Rebinding & CSRF Defenses:** Enforced strict `Host` header whitelisting (`127.0.0.1`, `localhost`, `::1`), `Sec-Fetch-Site: cross-site` rejection, and `Origin` validation on all state-changing endpoints.
+   - **Path Sanitization & Regular File Enforcement:** All inspection, planning, and testing endpoints canonicalize paths via `os.path.realpath(os.path.abspath())` and enforce `os.path.isfile()`, rejecting directories, special devices, and paths containing null bytes (`\x00`).
+   - **Multi-Threaded Architecture & Remote Exposure Protection:** Replaced single-threaded HTTP server with `ThreadingHTTPServer` for non-blocking concurrent request handling. Prohibited non-loopback binding unless explicitly authorized via `--allow-remote`.
+   - **Interactive Test Runner & Profile Evidence Modals:** Added interactive binary execution test runner (`POST /api/test`), full profile evidence bundle inspection (`GET /api/db/profile`), and prefix cleanup actions (`POST /api/prefixes/cleanup`) directly inside the Web Console.
 
 ---
 

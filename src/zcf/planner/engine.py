@@ -329,7 +329,7 @@ class CompatibilityPlanner:
                 selected_name = "Wine Compatibility Layer"
                 execution_mode = ExecutionMode.BLOCKED
                 missing_reqs.append("Wine (wine64 / wine) is required but not installed on host Linux system")
-                reasoning = "Target is a Windows executable; Wine installation is required to proceed."
+                reasoning = "Target is a Windows executable; Wine is not installed on host Linux system."
                 safe_steps.append("Install Wine package: 'sudo apt install wine64' or equivalent native package.")
 
             elif app.format == BinaryFormat.ELF and app.architecture.value != env.architecture:
@@ -353,6 +353,11 @@ class CompatibilityPlanner:
                 reasoning = f"No compatible runtime available for {app.format.value} ({app.architecture.value})."
                 missing_reqs.append(f"Unsupported binary format or unconfigured runtime: {app.format.value}")
                 safe_steps.append("Inspect binary with REA to analyze architecture and dependencies.")
+
+        if execution_mode == ExecutionMode.BLOCKED:
+            is_blocked = True
+            if not blocker_summary:
+                blocker_summary = reasoning
 
         return CompatibilityPlan(
             plan_id=plan_id,

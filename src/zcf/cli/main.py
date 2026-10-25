@@ -38,7 +38,12 @@ def cmd_gui(args):
 
 def cmd_console(args):
     from zcf.web.server import run_console
-    run_console(host=args.host, port=args.port, open_browser=not args.no_browser)
+    run_console(
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
+        allow_remote=getattr(args, "allow_remote", False),
+    )
 
 
 def cmd_run(args):
@@ -263,13 +268,45 @@ def cmd_test(args):
         plan = planner.plan(app, env)
 
         format_header(f"ZCF Execution Test: {app.file_name}")
-        print(f"  Selected Runtime: {plan.selected_runtime_name}")
+        print(f"  Selected Runtime: {plan.selected_runtime_name or 'None'}")
         print(f"  Execution Mode:   {plan.execution_mode.value.upper()}")
 
-        if not plan.selected_runtime_id or plan.execution_mode.value == "blocked":
+        # 1. Hard blocker: No suitable runtime adapter exists for this format/architecture
+        if not plan.selected_runtime_id:
             print(f"\n  Execution Blocked: {plan.reasoning}", file=sys.stderr)
             for req in plan.missing_requirements:
                 print(f"  [-] Missing requirement: {req}", file=sys.stderr)
+            if getattr(args, "record", False):
+                from zcf.core.models import CompatibilityStatus
+                db = CompatibilityDatabase()
+                entry = db.submit_profile(
+                    app=app,
+                    recommended_runtime="none",
+                    status=CompatibilityStatus.INCOMPATIBLE,
+                    contributor_name=getattr(args, "contributor", "Local Tester") or "Local Tester",
+                    test_procedure=f"Execution blocked: {plan.reasoning}",
+                    env=env,
+                )
+                print(f"\n  [Database] Test outcome recorded into local knowledge base: {entry.entry_id}")
+            sys.exit(2)
+
+        # 2. Live execution blocked: Missing runtime on host during a live test attempt
+        if not args.dry_run and plan.execution_mode.value == "blocked":
+            print(f"\n  Execution Blocked: {plan.reasoning}", file=sys.stderr)
+            for req in plan.missing_requirements:
+                print(f"  [-] Missing requirement: {req}", file=sys.stderr)
+            if getattr(args, "record", False):
+                from zcf.core.models import CompatibilityStatus
+                db = CompatibilityDatabase()
+                entry = db.submit_profile(
+                    app=app,
+                    recommended_runtime=plan.selected_runtime_id,
+                    status=CompatibilityStatus.UNTESTED,
+                    contributor_name=getattr(args, "contributor", "Local Tester") or "Local Tester",
+                    test_procedure=f"Live execution test blocked by host prerequisites: {plan.reasoning}",
+                    env=env,
+                )
+                print(f"\n  [Database] Test outcome recorded into local knowledge base: {entry.entry_id}")
             sys.exit(2)
 
         adapter = registry.get_adapter(plan.selected_runtime_id)
@@ -277,36 +314,64 @@ def cmd_test(args):
             print(f"Error: Adapter '{plan.selected_runtime_id}' not found in registry", file=sys.stderr)
             sys.exit(1)
 
-        context = adapter.prepare_environment(app)
+        context = adapter.prepare_environment(app, config={"dry_run": args.dry_run})
         result = adapter.execute(app, context, dry_run=args.dry_run)
 
-        print(f"\n  Result Status:    {'SUCCESS' if result.success else 'FAILED'}")
-        print(f"  Exit Code:        {result.exit_code}")
-        print(f"  Execution Time:   {result.execution_time_seconds:.4f}s")
-        if result.stdout:
-            print(f"\n  Output:\n{result.stdout.strip()}")
-        if result.stderr:
-            print(f"\n  Error Output:\n{result.stderr.strip()}")
+        if args.dry_run:
+            print(f"\n  Result Status:    SUCCESS (Orchestration Validated)")
+            print(f"  Exit Code:        0 (Dry Run)")
+            print(f"  Execution Time:   0.0000s")
+            if result.stdout:
+                print(f"\n  Output:\n{result.stdout.strip()}")
+            if plan.execution_mode.value == "blocked":
+                print(f"\n  [Notice] Host engine '{plan.selected_runtime_name}' is not installed; live execution is blocked until installed.")
+                for req in plan.missing_requirements:
+                    print(f"    [-] {req}")
 
-        if getattr(args, "record", False):
-            from zcf.core.models import CompatibilityStatus
-            db = CompatibilityDatabase()
-            if result.success and not args.dry_run:
-                compat_status = CompatibilityStatus.VERIFIED_COMPATIBLE
-            elif result.success and args.dry_run:
-                compat_status = CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND
-            else:
-                compat_status = CompatibilityStatus.FAILED
+            if getattr(args, "record", False):
+                from zcf.core.models import CompatibilityStatus, EvidenceStatus
+                db = CompatibilityDatabase()
+                entry = db.submit_profile(
+                    app=app,
+                    recommended_runtime=plan.selected_runtime_id,
+                    status=CompatibilityStatus.UNTESTED,
+                    contributor_name=getattr(args, "contributor", "Local Tester") or "Local Tester",
+                    test_procedure=f"Dry-run orchestration validation via {plan.selected_runtime_name} (unexecuted)",
+                    env=env,
+                    evidence_status=EvidenceStatus.UNTESTED,
+                )
+                print(f"\n  [Database] Test outcome recorded into local knowledge base: {entry.entry_id}")
+        else:
+            print(f"\n  Result Status:    {'SUCCESS' if result.success else 'FAILED'}")
+            print(f"  Exit Code:        {result.exit_code}")
+            print(f"  Execution Time:   {result.execution_time_seconds:.4f}s")
+            if result.stdout:
+                print(f"\n  Output:\n{result.stdout.strip()}")
+            if result.stderr:
+                print(f"\n  Error Output:\n{result.stderr.strip()}")
 
-            entry = db.submit_profile(
-                app=app,
-                recommended_runtime=plan.selected_runtime_id,
-                status=compat_status,
-                contributor_name=getattr(args, "contributor", "Local Tester") or "Local Tester",
-                test_procedure=f"{'Live execution test' if not args.dry_run else 'Dry-run validation test'} via {plan.selected_runtime_name} (exit code: {result.exit_code})",
-                env=env,
-            )
-            print(f"\n  [Database] Test outcome recorded into local knowledge base: {entry.entry_id}")
+            if getattr(args, "record", False):
+                from zcf.core.models import CompatibilityStatus
+                db = CompatibilityDatabase()
+                if result.success:
+                    compat_status = CompatibilityStatus.VERIFIED_COMPATIBLE
+                    procedure = f"Live execution test passed via {plan.selected_runtime_name} (exit code: 0)"
+                else:
+                    compat_status = CompatibilityStatus.INCOMPATIBLE
+                    procedure = f"Live execution test failed via {plan.selected_runtime_name} (exit code: {result.exit_code})"
+
+                entry = db.submit_profile(
+                    app=app,
+                    recommended_runtime=plan.selected_runtime_id,
+                    status=compat_status,
+                    contributor_name=getattr(args, "contributor", "Local Tester") or "Local Tester",
+                    test_procedure=procedure,
+                    env=env,
+                )
+                print(f"\n  [Database] Test outcome recorded into local knowledge base: {entry.entry_id}")
+
+            if not result.success:
+                sys.exit(result.exit_code if result.exit_code != 0 else 1)
 
     except Exception as e:
         print(f"Error during execution test: {str(e)}", file=sys.stderr)
@@ -555,12 +620,14 @@ def main(argv: Optional[List[str]] = None):
     p_console = subparsers.add_parser("console", help="Launch local browser-based Web Console")
     p_console.add_argument("--host", default="127.0.0.1", help="Host interface to bind (defaults to loopback 127.0.0.1)")
     p_console.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765)")
+    p_console.add_argument("--allow-remote", action="store_true", help="Explicitly permit binding to remote/non-loopback network interfaces")
     p_console.add_argument("--no-browser", action="store_true", help="Do not automatically launch web browser")
     p_console.set_defaults(func=cmd_console)
 
     p_web = subparsers.add_parser("web", help="Alias for 'console' (Launch local Web Console)")
     p_web.add_argument("--host", default="127.0.0.1", help="Host interface to bind (defaults to loopback 127.0.0.1)")
     p_web.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765)")
+    p_web.add_argument("--allow-remote", action="store_true", help="Explicitly permit binding to remote/non-loopback network interfaces")
     p_web.add_argument("--no-browser", action="store_true", help="Do not automatically launch web browser")
     p_web.set_defaults(func=cmd_console)
 

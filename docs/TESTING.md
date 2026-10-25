@@ -13,7 +13,7 @@
 
 ZCF enforces strict automated verification. Tests cover both positive execution paths and failure/negative paths. Speculative claims of compatibility are rejected; every capability asserted by the framework is backed by automated tests against real binaries, synthetic test fixtures, and distribution integration files.
 
-### Test Categories (23 Modules, 127 Tests)
+### Test Categories (23 Modules, 138 Tests)
 1. **Desktop UX & Beginner Dialogs (`test_desktop_ux.py`):** Tests Zenity/KDialog graphical modals, non-interactive fallbacks, Freedesktop specification path escaping (`%`, `$`, `"`, `\`), and rejection of control characters and newlines with `ValueError`.
 2. **Graphical User Interface (`test_gui.py`):** Tests standalone Tkinter/ttk `ZCFControlCenter` tabs (Launch, Runtimes, Components, Prefixes, Diag), unified Wine and Proton prefix lifecycle management, application inspection updates, and log diagnosis without UI freezing under `xvfb`.
 3. **Windows Component Manager (`test_components.py`):** Tests component definitions (Visual C++, DirectX D3DX9, Wine Mono, DXVK), strict all-DLL filesystem verification (`system32`/`syswow64`), removal of metadata fallback, automated winetricks handling, non-blocking monotonic deadline loops, process killing on timeout, and cleanup of stale metadata on installation failures.
@@ -35,8 +35,8 @@ ZCF enforces strict automated verification. Tests cover both positive execution 
 19. **Compatibility Sync Tests (`test_sync.py`):** Validates portable JSON bundle export, cryptographic hashing, schema and count validation, atomic import with automatic rollback on error, and untrusted third-party provenance downgrading.
 20. **Bubblewrap Sandbox Tests (`test_sandbox.py`):** Validates Bubblewrap `bwrap` command isolation, strict path canonicalization and ancestor symlink resolution, rejection of sensitive system directories (`/`, `/etc`, `/usr`, `/run`, `/var`), symlink escape prevention, containment within approved prefix roots, narrow Wayland display socket binding, rejection of conflicting read-only and writable mounts, fail-closed enforcement when bwrap is missing, and resource control status.
 21. **Security Controller Tests (`test_security.py`):** Validates path traversal defenses, environment secret scrubbing across modes (`minimized_desktop`, `strict_allowlist`, `filter_secrets`), display variable preservation (`XAUTHORITY`), default network isolation across all workloads with explicit opt-in, and workload-aware timeout defaults and boundaries.
-22. **Web Console & REST API Tests (`test_web_console.py`):** Validates local loopback browser control center, HTTP security headers (`nosniff`, `DENY`, CSP), single-page dashboard HTML delivery, and REST API endpoints (`/api/env`, `/api/db`, `/api/prefixes`, `/api/dashboard`, `/api/inspect`, `/api/plan`, `/api/diag`).
-23. **CLI Workflows & Command Dispatch (`test_cli_workflows.py`):** Validates symmetric desktop integration (`integrate --list`, `integrate --remove`), background maintenance (`service list-prefixes`, `service cleanup-prefixes`), database profile verification with structured test evidence, profile deletion, and compatibility test outcome recording.
+22. **Web Console & REST API Tests (`test_web_console.py`):** Validates local loopback browser control center, ThreadingHTTPServer concurrent requests, HTTP security headers (`nosniff`, `DENY`, CSP), single-page dashboard HTML delivery, REST API endpoints (`/api/env`, `/api/db`, `/api/db/profile`, `/api/prefixes`, `/api/prefixes/cleanup`, `/api/dashboard`, `/api/inspect`, `/api/plan`, `/api/test`, `/api/diag`), DNS rebinding protection (Host header validation), CSRF / cross-site fetch rejection, payload size caps (2MB), path traversal prevention, and remote exposure restrictions.
+23. **CLI Workflows & Command Dispatch (`test_cli_workflows.py`):** Validates symmetric desktop integration (`integrate --list`, `integrate --remove`), background maintenance (`service list-prefixes`, `service cleanup-prefixes`), database profile verification with structured test evidence, profile deletion, dry-run outcome recording with honest `UNTESTED` status, live execution recording, and blocked execution exits with code 2.
 
 ---
 
@@ -48,13 +48,13 @@ $env:PYTHONPATH="src"
 $env:ZCF_NON_INTERACTIVE="1"
 python -m unittest discover -s tests -v
 ```
-**Outcome:** Ran 127 tests in 32.531s — **OK (100% Passed, 0 Failures, 0 Errors)**
+**Outcome:** Ran 138 tests in 27.442s — **OK (100% Passed, 0 Failures, 0 Errors)**
 
 ### 2.2 Linux Environment (WSL2 Ubuntu 26.04 with Xvfb)
 ```bash
 PYTHONPATH=src xvfb-run -a python3 -m unittest discover -s tests -v
 ```
-**Outcome:** Ran 127 tests in 35.402s — **OK (100% Passed, 0 Failures, 0 Errors)**
+**Outcome:** Ran 138 tests in 28.019s — **OK (100% Passed, 0 Failures, 0 Errors)**
 
 ---
 
@@ -62,10 +62,10 @@ PYTHONPATH=src xvfb-run -a python3 -m unittest discover -s tests -v
 
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu (xvfb) |
 |---|---|---|
-| Tests Collected | 127 | 127 |
-| Tests Passed | 127 | 127 |
+| Tests Collected | 138 | 138 |
+| Tests Passed | 138 | 138 |
 | Tests Failed | 0 | 0 |
 | Tests Errored | 0 | 0 |
 | Tests Skipped | 0 | 0 |
 | Success Rate | **100%** | **100%** |
-| Execution Duration | 32.53s | 35.40s |
+| Execution Duration | 27.44s | 28.02s |

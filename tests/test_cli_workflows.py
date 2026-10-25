@@ -124,6 +124,44 @@ class TestCLIWorkflows(unittest.TestCase):
             self.assertIn("ZCF Execution Test", out)
             self.assertIn("[Database] Test outcome recorded", out)
 
+            # Honest provenance verification: dry-run must NOT record verified compatible
+            from zcf.inspector.inspector import ApplicationInspector
+            app = ApplicationInspector().inspect(self.pe_fixture)
+            entry = db.get_by_sha256(app.sha256)
+            self.assertIsNotNone(entry)
+            self.assertEqual(entry.status, CompatibilityStatus.UNTESTED)
+            self.assertEqual(entry.evidence_status, EvidenceStatus.UNTESTED)
+            self.assertIn("Dry-run", entry.test_procedure)
+
+    def test_cli_test_live_execution_script(self):
+        """Verifies 'zcf test' live execution on a runnable script fixture."""
+        script_fixture = os.path.join(self.fixtures_dir, "valid_script.sh")
+        if not os.path.exists(script_fixture):
+            self.skipTest("Script fixture missing")
+        db = CompatibilityDatabase(storage_dir=self.db_dir)
+        with patch("zcf.cli.main.CompatibilityDatabase", return_value=db):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main(["test", script_fixture, "--dry-run", "--record", "--contributor", "Script Tester"])
+            out = buf.getvalue()
+            self.assertIn("ZCF Execution Test", out)
+            self.assertIn("[Database] Test outcome recorded", out)
+
+    def test_cli_test_blocked_hard_incompatibility(self):
+        """Verifies 'zcf test' cleanly blocks and exits with code 2 for unsupported binaries."""
+        corrupted_fixture = os.path.join(self.fixtures_dir, "corrupted.bin")
+        if not os.path.exists(corrupted_fixture):
+            self.skipTest("Corrupted fixture missing")
+        db = CompatibilityDatabase(storage_dir=self.db_dir)
+        with patch("zcf.cli.main.CompatibilityDatabase", return_value=db):
+            buf = io.StringIO()
+            err_buf = io.StringIO()
+            with redirect_stdout(buf), redirect_stderr(err_buf):
+                with self.assertRaises(SystemExit) as ctx:
+                    main(["test", corrupted_fixture, "--record"])
+            self.assertEqual(ctx.exception.code, 2)
+            self.assertIn("Execution Blocked", err_buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
