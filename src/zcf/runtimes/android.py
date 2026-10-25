@@ -90,20 +90,25 @@ class AndroidContainerAdapter(BaseRuntimeAdapter):
             errors.append("Waydroid CLI ('waydroid') is not installed on this host system")
 
         if not os.path.exists("/dev/binder"):
-            warnings.append("Kernel binder IPC driver (/dev/binder) not detected; required for Android IPC.")
+            errors.append("Kernel binder IPC driver (/dev/binder) not detected; required for Android IPC.")
 
         if env.display_server.value != "wayland":
-            warnings.append("Waydroid requires an active Wayland display compositor for surface rendering.")
+            errors.append("Waydroid requires an active Wayland display compositor for surface rendering.")
 
         return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
     def prepare_environment(
         self, app: ApplicationDescription, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        config = config or {}
+        action = config.get("action", "install_and_launch" if app.entry_point else "install")
+        package_name = config.get("package_name") or app.entry_point
         return {
             "waydroid_binary": shutil.which("waydroid") or "waydroid",
             "environment_variables": os.environ.copy(),
             "working_directory": os.path.dirname(os.path.abspath(app.artifact_path)),
+            "action": action,
+            "package_name": package_name,
         }
 
     def build_command(
@@ -111,8 +116,9 @@ class AndroidContainerAdapter(BaseRuntimeAdapter):
     ) -> List[str]:
         waydroid_bin = context.get("waydroid_binary") or shutil.which("waydroid") or "waydroid"
         action = context.get("action", "install")
-        if action == "launch" and app.entry_point:
-            return [waydroid_bin, "app", "launch", app.entry_point]
+        target_package = context.get("package_name") or app.entry_point
+        if action == "launch" and target_package:
+            return [waydroid_bin, "app", "launch", target_package]
         abs_target = os.path.abspath(app.artifact_path)
         return [waydroid_bin, "app", "install", abs_target]
 
@@ -130,22 +136,60 @@ class AndroidContainerAdapter(BaseRuntimeAdapter):
         stream_callback: Optional[Callable[[str], None]] = None,
         timeout: Optional[int] = None,
     ) -> ExecutionResult:
+        action = context.get("action", "install_and_launch" if app.entry_point else "install")
         cmd = self.build_command(app, context, args)
         if dry_run:
+            desc = "APK container installation and launch" if action == "install_and_launch" else ("APK application launch" if action == "launch" else "APK package installation")
             return ExecutionResult(
                 success=True,
                 exit_code=0,
-                stdout=f"[Dry Run] Prepared Waydroid APK container deployment:\nCommand: {' '.join(cmd)}",
+                stdout=f"[Dry Run] Prepared Waydroid {desc}:\nCommand: {' '.join(cmd)}",
                 stderr="",
                 execution_time_seconds=0.0,
                 command=cmd,
                 effective_runtime=self.get_id(),
             )
 
-        return self._execute_process(
+        if action == "install_and_launch" and app.entry_point:
+            # 1. First install the package
+            install_cmd = [shutil.which("waydroid") or "waydroid", "app", "install", os.path.abspath(app.artifact_path)]
+            install_res = self._execute_process(
+                cmd=install_cmd,
+                context=context,
+                dry_run=dry_run,
+                stream_callback=stream_callback,
+                timeout=timeout,
+            )
+            if not install_res.success or install_res.exit_code != 0:
+                install_res.stdout = f"[Waydroid Installation Failed]\n{install_res.stdout}"
+                return install_res
+
+            # 2. Launch installed application activity
+            launch_cmd = self.build_launch_command(app.entry_point)
+            launch_res = self._execute_process(
+                cmd=launch_cmd,
+                context=context,
+                dry_run=dry_run,
+                stream_callback=stream_callback,
+                timeout=timeout,
+            )
+            launch_res.stdout = f"[Waydroid APK Installed & Launched: {app.entry_point}]\n{launch_res.stdout}"
+            return launch_res
+
+        # Default action: install only (or launch only if action == "launch")
+        res = self._execute_process(
             cmd=cmd,
             context=context,
             dry_run=dry_run,
             stream_callback=stream_callback,
             timeout=timeout,
         )
+        if res.success and res.exit_code == 0:
+            if action == "install":
+                msg = f"\n[ZCF Android] APK package '{app.file_name}' installed successfully inside Waydroid."
+                if app.entry_point:
+                    msg += f"\nLaunch with: zcf run --runtime runtime.android --action launch {app.entry_point}"
+                res.stdout += msg
+            elif action == "launch":
+                res.stdout += f"\n[ZCF Android] Application '{app.entry_point}' launched inside Waydroid."
+        return res

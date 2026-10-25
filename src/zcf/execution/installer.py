@@ -79,19 +79,31 @@ class PackageInstallerBridge:
             "opensuse": "box64",
             "alpine": "box64",
         },
-        "proton": {
-            "debian": "steam",
-            "ubuntu": "steam",
-            "arch": "steam",
-            "fedora": "steam",
-            "rhel": "steam",
-            "opensuse": "steam",
-            "alpine": "steam",
-        },
+    }
+
+    MANUAL_GUIDANCE: Dict[str, str] = {
+        "proton": (
+            "Valve Proton is not a standard standalone Linux distro package; it is distributed via Steam "
+            "or community compatibility builds (GE-Proton).\n"
+            "To install and configure Proton:\n"
+            "1. Install Steam from your distribution repository (or Flatpak).\n"
+            "2. Open Steam Settings -> Compatibility -> Enable Steam Play for all other titles.\n"
+            "3. Alternatively, install GE-Proton into ~/.steam/root/compatibilitytools.d/ using 'protonup' or ProtonUp-Qt."
+        ),
+        "box64": (
+            "Box64 provides x86_64 dynamic translation on ARM64 Linux hosts.\n"
+            "On Arch Linux: install 'box64-bin' via AUR.\n"
+            "On Debian/Ubuntu ARM64: install via Box64 official apt repository (https://ryanfortner.github.io/box64-debs/).\n"
+            "On x86_64 hosts: Box64 is unnecessary as x86_64 runs natively."
+        ),
     }
 
     def __init__(self, distro: Optional[str] = None):
         self.distro = (distro or self._detect_distribution()).lower()
+
+    def get_manual_guidance(self, generic_target: str) -> Optional[str]:
+        """Provides accurate manual installation guidance for runtimes without guaranteed single-package installation."""
+        return self.MANUAL_GUIDANCE.get(generic_target.lower())
 
     def _detect_distribution(self) -> str:
         if os.path.exists("/etc/os-release"):
@@ -108,8 +120,13 @@ class PackageInstallerBridge:
 
     def get_install_command(self, generic_target: str) -> Optional[List[str]]:
         """Returns the appropriate command to install a generic dependency."""
-        pkg_map = self.PACKAGE_MAPPINGS.get(generic_target.lower(), {})
-        target_pkg = pkg_map.get(self.distro, pkg_map.get("debian", generic_target))
+        target_key = generic_target.lower()
+        if target_key not in self.PACKAGE_MAPPINGS:
+            return None
+        pkg_map = self.PACKAGE_MAPPINGS[target_key]
+        target_pkg = pkg_map.get(self.distro, pkg_map.get("debian"))
+        if not target_pkg:
+            return None
 
         # Check for PackageKit (pkcon) first - distro standard for user desktop installs
         if shutil.which("pkcon"):

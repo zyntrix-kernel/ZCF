@@ -104,7 +104,7 @@ class ProtonAdapter(BaseRuntimeAdapter):
         if not self._find_proton_binary():
             missing.append("Proton runner script not found in Steam compatibility directories.")
         if not env.graphics_capabilities.get("vulkan_supported", False):
-            missing.append("Vulkan driver not detected; required for DXVK translation layer.")
+            missing.append("Vulkan driver not detected; required for Proton DXVK translation layer.")
         return missing
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:
@@ -119,17 +119,25 @@ class ProtonAdapter(BaseRuntimeAdapter):
             errors.append("Proton executable not found in standard Steam compatibility paths")
 
         if not env.graphics_capabilities.get("vulkan_supported", False):
-            warnings.append(
-                "Host system lacks verified Vulkan driver; DXVK performance may fall back to CPU or fail."
-            )
+            errors.append("Proton requires Vulkan driver for DXVK acceleration; host lacks Vulkan support.")
 
         return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
     def prepare_environment(
         self, app: ApplicationDescription, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        is_dry_run = config.get("dry_run", False) if config else False
         prefix_path = self.prefix_manager.get_prefix_path(app.sha256)
-        os.makedirs(prefix_path, exist_ok=True)
+        if not is_dry_run:
+            os.makedirs(prefix_path, exist_ok=True)
+            self.prefix_manager.record_usage(
+                prefix_path=prefix_path,
+                app_name=app.file_name or "Windows Game / Application",
+                app_sha256=app.sha256,
+                is_persistent=True,
+                architecture="win64" if app.architecture == Architecture.X86_64 else "win32",
+                runtime_type="proton",
+            )
 
         env_vars = os.environ.copy()
         env_vars["STEAM_COMPAT_DATA_PATH"] = prefix_path

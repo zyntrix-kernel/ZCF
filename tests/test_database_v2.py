@@ -42,10 +42,12 @@ class TestDatabaseV2(unittest.TestCase):
         self.assertEqual(len(arch_entries), 1)
 
     def test_community_submission_workflow(self):
+        import hashlib
+        real_sha256 = hashlib.sha256(b"sample_game_payload_v2").hexdigest()
         app = ApplicationDescription(
             artifact_path="/tmp/game.exe",
             file_name="game.exe",
-            sha256="9" * 64,
+            sha256=real_sha256,
             byte_size=1024,
             format=BinaryFormat.PE,
             architecture=Architecture.X86_64,
@@ -69,20 +71,26 @@ class TestDatabaseV2(unittest.TestCase):
 
         self.assertEqual(entry.provenance_tier, ProvenanceTier.COMMUNITY_UNTESTED)
         self.assertEqual(entry.evidence_status, EvidenceStatus.COMMUNITY_REPORTED)
-        self.assertEqual(entry.target_sha256, "9" * 64)
+        self.assertEqual(entry.target_sha256, real_sha256)
 
         # Retrieve and verify persistence
-        saved = self.db.get_by_sha256("9" * 64)
+        saved = self.db.get_by_sha256(real_sha256)
         self.assertIsNotNone(saved)
         self.assertEqual(saved.application_name, "game.exe")
 
-        # Promote/verify record
+        # Promote/verify record with structured evidence
+        structured_evidence = {
+            "test_environment": {"os": "ubuntu", "kernel": "6.18", "runner_version": "wine-9.0"},
+            "test_procedure": "Full headless prefix initialization and DXVK audio test",
+            "test_results": {"exit_code": 0, "fps_average": 60},
+        }
         verified = self.db.verify_profile(
             entry_id=entry.entry_id,
             verifier="Maintainer Bob",
             evidence_status=EvidenceStatus.VERIFIED,
             provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
             notes="Reproduced cleanly on Ubuntu 26.04.",
+            structured_evidence=structured_evidence,
         )
         self.assertTrue(verified)
 

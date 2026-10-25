@@ -40,7 +40,7 @@ jobs:
           PYTHONPATH: src
           ZCF_NON_INTERACTIVE: "1"
         run: |
-          python3 -m unittest discover -s tests -v
+          xvfb-run -a python3 -m unittest discover -s tests -v
 
       - name: Validate Packaging & Debian Package Generation
         run: |

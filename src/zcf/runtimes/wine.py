@@ -107,8 +107,18 @@ class WineAdapter(BaseRuntimeAdapter):
     def prepare_environment(
         self, app: ApplicationDescription, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        is_dry_run = config.get("dry_run", False) if config else False
         prefix_path = self.prefix_manager.get_prefix_path(app.sha256)
-        os.makedirs(prefix_path, exist_ok=True)
+        if not is_dry_run:
+            os.makedirs(prefix_path, exist_ok=True)
+            self.prefix_manager.record_usage(
+                prefix_path=prefix_path,
+                app_name=app.file_name or "Windows Application",
+                app_sha256=app.sha256,
+                is_persistent=True,
+                architecture="win64" if app.architecture == Architecture.X86_64 else "win32",
+                runtime_type="wine",
+            )
 
         env_vars = os.environ.copy()
         env_vars["WINEPREFIX"] = prefix_path

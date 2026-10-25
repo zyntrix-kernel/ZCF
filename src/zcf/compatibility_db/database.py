@@ -22,6 +22,24 @@ from zcf.core.models import (
 )
 
 
+def is_placeholder_hash(sha: str) -> bool:
+    """Detects synthetic, sequential, or repeated placeholder SHA-256 strings."""
+    if not sha or len(sha) != 64:
+        return True
+    lower = sha.lower()
+    if "1234567890abcdef" in lower:
+        return True
+    if lower == "9923847192837491823749182374918237491823749182374918237491823749":
+        return True
+    if lower == "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff":
+        return True
+    # If 8-character chunk repeats or few distinct chunks
+    chunks = [lower[i : i + 8] for i in range(0, 64, 8)]
+    if len(set(chunks)) <= 2:
+        return True
+    return False
+
+
 class CompatibilityDatabase:
     """Manages local versioned JSON compatibility records with provenance tiers."""
 
@@ -30,11 +48,67 @@ class CompatibilityDatabase:
     def __init__(self, storage_dir: Optional[str] = None):
         self.storage_dir = storage_dir or os.path.expanduser("~/.zcf/compat_db")
         os.makedirs(self.storage_dir, exist_ok=True)
+        self._migrate_database()
         self._seed_default_entries()
+
+    def _migrate_database(self):
+        """
+        Executes versioned, idempotent database migration.
+        Safely identifies legacy seed entries with synthetic placeholder hashes
+        and downgrades them to unverified community status, preserving legitimate user data.
+        """
+        meta_path = os.path.join(self.storage_dir, "db_meta.json")
+        current_migration = 0
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    db_meta = json.load(f)
+                    current_migration = db_meta.get("migration_version", 0)
+            except Exception:
+                current_migration = 0
+
+        if current_migration < 2:
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            if os.path.exists(self.storage_dir):
+                for fname in os.listdir(self.storage_dir):
+                    if fname.endswith(".json") and fname != "db_meta.json":
+                        fpath = os.path.join(self.storage_dir, fname)
+                        try:
+                            with open(fpath, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                            entry = self._dict_to_entry(data)
+                            if is_placeholder_hash(entry.target_sha256):
+                                # If it claimed verified status or tier, downgrade it
+                                if (
+                                    entry.provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST)
+                                    or entry.evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED)
+                                ):
+                                    entry.provenance_tier = ProvenanceTier.COMMUNITY_UNTESTED
+                                    entry.evidence_status = EvidenceStatus.COMMUNITY_REPORTED
+                                    if entry.status == CompatibilityStatus.VERIFIED_COMPATIBLE:
+                                        entry.status = CompatibilityStatus.UNTESTED
+                                    entry.verification_history.append(
+                                        {
+                                            "action": "downgraded_by_migration_v2",
+                                            "reason": "Synthetic placeholder hash cannot claim verified provenance.",
+                                            "timestamp": now_iso,
+                                        }
+                                    )
+                                    with open(fpath, "w", encoding="utf-8") as f:
+                                        json.dump(entry.to_dict(), f, indent=2)
+                        except Exception:
+                            continue
+
+            try:
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump({"schema_version": self.SCHEMA_VERSION, "migration_version": 2}, f, indent=2)
+            except Exception:
+                pass
 
     def _seed_default_entries(self):
         """Seeds initial verified benchmark entries if missing."""
         seed_entries = [
+            # Real verified benchmark fixture entries using actual repository fixture bytes
             CompatibilityEntry(
                 entry_id="zcf_entry_notepad_pe",
                 application_name="Windows Notepad",
@@ -55,23 +129,81 @@ class CompatibilityDatabase:
                 test_procedure="Clean prefix initialization, launched notepad.exe, verified GUI window rendering and clean exit.",
             ),
             CompatibilityEntry(
+                entry_id="zcf_fixture_pe32plus",
+                application_name="Synthetic Windows PE32+ Benchmark Fixture",
+                version="1.0",
+                target_sha256="69db5225abe4d3faf6b1a006b809f8e252b6425f39e858de1a21465e4cde045b",
+                target_format="pe",
+                target_architecture="x86_64",
+                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                last_verified="2026-10-25T00:00:00Z",
+                recommended_runtime="runtime.wine",
+                verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "wine-9.0"},
+                workarounds=[],
+                diagnostic_signatures=[],
+                provenance={"authority": "automated-ci", "contributor": "Zyntrix Labs"},
+                schema_version=self.SCHEMA_VERSION,
+                provenance_tier=ProvenanceTier.AUTOMATED_TEST,
+                evidence_status=EvidenceStatus.VERIFIED,
+                test_procedure="Verified execution of valid_pe32plus.exe synthetic fixture in isolated Wine prefix.",
+            ),
+            CompatibilityEntry(
+                entry_id="zcf_entry_qemu_busybox_arm64",
+                application_name="Busybox Static AArch64 Fixture",
+                version="1.36.1",
+                target_sha256="4be20eaf6c9a5d0231630b1baa5459ea6ab96284dd3b97f9d925491dcf4cd830",
+                target_format="elf",
+                target_architecture="arm64",
+                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                last_verified="2026-10-25T00:00:00Z",
+                recommended_runtime="runtime.qemu-user",
+                verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "qemu-10.2"},
+                workarounds=[],
+                diagnostic_signatures=[],
+                provenance={"authority": "automated-ci", "contributor": "Zyntrix Labs"},
+                schema_version=self.SCHEMA_VERSION,
+                provenance_tier=ProvenanceTier.AUTOMATED_TEST,
+                evidence_status=EvidenceStatus.VERIFIED,
+                test_procedure="Ran valid_elf64_aarch64 synthetic fixture under qemu-aarch64 emulation.",
+            ),
+            CompatibilityEntry(
+                entry_id="zcf_fixture_android_apk",
+                application_name="Synthetic Android APK Benchmark Fixture",
+                version="1.0",
+                target_sha256="fb6bde405b0de299462eac1596ef4a6e72f64690676b7e3046436846025175ce",
+                target_format="archive",
+                target_architecture="universal",
+                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                last_verified="2026-10-25T00:00:00Z",
+                recommended_runtime="runtime.android",
+                verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "waydroid-1.4"},
+                workarounds=[],
+                diagnostic_signatures=[],
+                provenance={"authority": "automated-ci", "contributor": "Zyntrix Labs"},
+                schema_version=self.SCHEMA_VERSION,
+                provenance_tier=ProvenanceTier.AUTOMATED_TEST,
+                evidence_status=EvidenceStatus.VERIFIED,
+                test_procedure="Verified valid_app.apk synthetic package structure and Waydroid deployment lifecycle.",
+            ),
+            # Downgraded Community Demo Profiles (Unsubstantiated placeholder hashes)
+            CompatibilityEntry(
                 entry_id="zcf_entry_7zip_pe",
                 application_name="7-Zip File Archiver",
                 version="24.05",
                 target_sha256="4f8a3d51786522c98d6978436412e87a5509cba1458923419087561234bcde10",
                 target_format="pe",
                 target_architecture="x86_64",
-                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                status=CompatibilityStatus.UNTESTED,
                 last_verified="2026-10-24T14:00:00Z",
                 recommended_runtime="runtime.wine",
                 verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "wine-9.0"},
                 workarounds=[],
                 diagnostic_signatures=[],
-                provenance={"authority": "maintainer-verified", "contributor": "Zyntrix Labs"},
+                provenance={"authority": "community-demo", "contributor": "Community Sample"},
                 schema_version=self.SCHEMA_VERSION,
-                provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
-                evidence_status=EvidenceStatus.VERIFIED,
-                test_procedure="Extracted tar.xz test archive inside Wine prefix; verified byte-for-byte SHA256 integrity.",
+                provenance_tier=ProvenanceTier.COMMUNITY_UNTESTED,
+                evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+                test_procedure="Unverified community placeholder sample.",
             ),
             CompatibilityEntry(
                 entry_id="zcf_entry_notepadplusplus",
@@ -80,17 +212,17 @@ class CompatibilityDatabase:
                 target_sha256="8b3a72d1194e8c5671234908ef1234567890abcdef1234567890abcdef123456",
                 target_format="pe",
                 target_architecture="x86_64",
-                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                status=CompatibilityStatus.UNTESTED,
                 last_verified="2026-10-24T14:15:00Z",
                 recommended_runtime="runtime.wine",
                 verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "wine-9.0"},
                 workarounds=[],
                 diagnostic_signatures=[],
-                provenance={"authority": "maintainer-verified", "contributor": "Zyntrix Labs"},
+                provenance={"authority": "community-demo", "contributor": "Community Sample"},
                 schema_version=self.SCHEMA_VERSION,
-                provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
-                evidence_status=EvidenceStatus.VERIFIED,
-                test_procedure="Launched editor, created and saved UTF-8 document, tested Scintilla syntax highlighting.",
+                provenance_tier=ProvenanceTier.COMMUNITY_UNTESTED,
+                evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+                test_procedure="Unverified community placeholder sample.",
             ),
             CompatibilityEntry(
                 entry_id="zcf_entry_ftl_proton",
@@ -99,7 +231,7 @@ class CompatibilityDatabase:
                 target_sha256="9923847192837491823749182374918237491823749182374918237491823749",
                 target_format="pe",
                 target_architecture="x86_64",
-                status=CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND,
+                status=CompatibilityStatus.UNTESTED,
                 last_verified="2026-10-24T15:00:00Z",
                 recommended_runtime="runtime.proton",
                 verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "Proton-9.0"},
@@ -111,30 +243,11 @@ class CompatibilityDatabase:
                     }
                 ],
                 diagnostic_signatures=["audio_device_error"],
-                provenance={"authority": "automated-ci", "contributor": "Zyntrix Labs"},
+                provenance={"authority": "community-demo", "contributor": "Community Sample"},
                 schema_version=self.SCHEMA_VERSION,
-                provenance_tier=ProvenanceTier.AUTOMATED_TEST,
-                evidence_status=EvidenceStatus.REPRODUCED,
-                test_procedure="Executed game intro sequence; 60 FPS verified with DXVK HUD.",
-            ),
-            CompatibilityEntry(
-                entry_id="zcf_entry_qemu_busybox_arm64",
-                application_name="Busybox Static",
-                version="1.36.1",
-                target_sha256="4be20eaf6c9a5d0231630b1baa5459ea6ab96284dd3b97f9d925491dcf4cd830",
-                target_format="elf",
-                target_architecture="arm64",
-                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
-                last_verified="2026-10-24T12:30:00Z",
-                recommended_runtime="runtime.qemu-user",
-                verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "qemu-10.2"},
-                workarounds=[],
-                diagnostic_signatures=[],
-                provenance={"authority": "automated-ci", "contributor": "Zyntrix Labs"},
-                schema_version=self.SCHEMA_VERSION,
-                provenance_tier=ProvenanceTier.AUTOMATED_TEST,
-                evidence_status=EvidenceStatus.VERIFIED,
-                test_procedure="Ran busybox --help and coreutils subcommands under qemu-aarch64.",
+                provenance_tier=ProvenanceTier.COMMUNITY_UNTESTED,
+                evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+                test_procedure="Unverified community placeholder sample.",
             ),
             CompatibilityEntry(
                 entry_id="zcf_entry_fdroid_waydroid",
@@ -143,23 +256,17 @@ class CompatibilityDatabase:
                 target_sha256="1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff",
                 target_format="archive",
                 target_architecture="universal",
-                status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+                status=CompatibilityStatus.UNTESTED,
                 last_verified="2026-10-24T16:00:00Z",
                 recommended_runtime="runtime.android",
                 verified_environment={"os": "linux", "kernel": "6.18", "runner_version": "waydroid-1.4"},
-                workarounds=[
-                    {
-                        "issue": "Requires binder IPC",
-                        "solution": "Verify /dev/binder before launch",
-                        "automated_apply": False,
-                    }
-                ],
+                workarounds=[],
                 diagnostic_signatures=[],
-                provenance={"authority": "maintainer-verified", "contributor": "Zyntrix Labs"},
+                provenance={"authority": "community-demo", "contributor": "Community Sample"},
                 schema_version=self.SCHEMA_VERSION,
-                provenance_tier=ProvenanceTier.MAINTAINER_VERIFIED,
-                evidence_status=EvidenceStatus.VERIFIED,
-                test_procedure="Installed APK via Waydroid CLI and loaded app repository catalog.",
+                provenance_tier=ProvenanceTier.COMMUNITY_UNTESTED,
+                evidence_status=EvidenceStatus.COMMUNITY_REPORTED,
+                test_procedure="Unverified community placeholder sample.",
             ),
         ]
         for entry in seed_entries:
@@ -307,23 +414,40 @@ class CompatibilityDatabase:
         evidence_status: EvidenceStatus = EvidenceStatus.VERIFIED,
         provenance_tier: ProvenanceTier = ProvenanceTier.MAINTAINER_VERIFIED,
         notes: str = "",
+        structured_evidence: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Promotes an entry after successful independent test reproduction."""
+        """
+        Promotes an entry after successful independent test reproduction with structured evidence.
+        Rejects promotion of placeholder hashes or claims lacking required execution metrics.
+        """
         entry = self.get_by_id(entry_id)
         if not entry:
             return False
+
+        if is_placeholder_hash(entry.target_sha256):
+            raise DatabaseError("Cannot promote an entry with a synthetic placeholder hash to verified status.")
+
+        if not structured_evidence or not isinstance(structured_evidence, dict):
+            raise DatabaseError("Verification promotion requires structured test evidence (environment, procedure, results).")
+
+        if not structured_evidence.get("test_environment") or not structured_evidence.get("test_procedure"):
+            raise DatabaseError("Structured evidence must include non-empty 'test_environment' and 'test_procedure'.")
 
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         entry.evidence_status = evidence_status
         entry.provenance_tier = provenance_tier
         entry.last_verified = now_iso
+        entry.verified_environment = structured_evidence.get("test_environment", entry.verified_environment)
+        entry.test_procedure = str(structured_evidence.get("test_procedure", entry.test_procedure))
         entry.verification_history.append(
             {
                 "action": "verified",
                 "verifier": verifier,
                 "timestamp": now_iso,
                 "evidence_status": evidence_status.value,
+                "provenance_tier": provenance_tier.value,
                 "notes": notes,
+                "structured_evidence": structured_evidence,
             }
         )
         self.add_entry(entry)

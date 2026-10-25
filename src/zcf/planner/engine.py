@@ -15,6 +15,7 @@ from zcf.core.models import (
     CandidateEvaluation,
     CompatibilityEntry,
     CompatibilityPlan,
+    CompatibilityStatus,
     EnvironmentReport,
     EvidenceStatus,
     ExecutionMode,
@@ -88,9 +89,25 @@ class CompatibilityPlanner:
             candidate_blocked = is_blocked
             candidate_blocker_reasons = [blocker_summary] if blocker_summary else []
 
+            # Classify mandatory prerequisites vs soft warnings
+            mandatory_missing: List[str] = []
+            for p in missing_prereqs:
+                p_lower = p.lower()
+                if any(k in p_lower for k in ("not installed", "not found", "missing", "required", "lacks", "cannot execute")):
+                    if "optional" not in p_lower and "recommended" not in p_lower:
+                        mandatory_missing.append(p)
+
             if not validation.valid:
                 eligible = False
+                candidate_blocked = True
+                candidate_blocker_reasons.extend(validation.errors)
                 notes = f"Ineligible: {'; '.join(validation.errors)}"
+            elif mandatory_missing:
+                eligible = False
+                candidate_blocked = True
+                candidate_blocker_reasons.extend(mandatory_missing)
+                score = 0.0
+                notes = f"Blocked by missing mandatory prerequisite: {'; '.join(mandatory_missing)}"
             else:
                 eligible = True
                 if rid == "runtime.native":
@@ -108,8 +125,9 @@ class CompatibilityPlanner:
                         score = 0.95
                         notes = "Native script execution via host interpreter"
                     else:
-                        score = 0.70
-                        notes = "Native execution with potential runtime dependencies"
+                        score = 0.0
+                        eligible = False
+                        notes = f"Native execution does not support format {app.format.value}"
 
                 elif rid == "runtime.proton":
                     if not installed:
@@ -167,15 +185,27 @@ class CompatibilityPlanner:
 
             # Database evidence weighting by provenance tier and verification status
             if db_evidence and db_evidence.recommended_runtime == rid:
-                is_verified = (
+                # Internally consistent verification check:
+                is_placeholder = False
+                if db_evidence.target_sha256:
+                    s_lower = db_evidence.target_sha256.lower()
+                    if "1234567890abcdef" in s_lower or s_lower.startswith("11112222") or s_lower.startswith("9923847192837491"):
+                        is_placeholder = True
+
+                is_consistent_verified = (
                     db_evidence.provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST)
-                    or db_evidence.evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED)
+                    and db_evidence.evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED)
+                    and db_evidence.status in (CompatibilityStatus.VERIFIED_COMPATIBLE, CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND)
+                    and not is_placeholder
                 )
-                if is_verified:
+                # Hard incompatibilities and missing critical prerequisites always override database recommendations!
+                if not candidate_blocked and eligible and is_consistent_verified:
                     score = min(score + 0.05, 1.0)
                     notes += f" [Verified in ZCF Database ({db_evidence.provenance_tier.value}): {db_evidence.status.value}]"
+                elif is_consistent_verified:
+                    notes += f" [ZCF Database ({db_evidence.provenance_tier.value}): overridden by unmet host prerequisites]"
                 else:
-                    notes += f" [Community Reported in ZCF Database: {db_evidence.status.value}]"
+                    notes += f" [Unverified/Community in ZCF Database: {db_evidence.status.value}]"
 
             candidates.append(
                 CandidateEvaluation(
@@ -190,7 +220,7 @@ class CompatibilityPlanner:
                 )
             )
 
-            if eligible and installed and not is_blocked and score > highest_score:
+            if eligible and installed and not candidate_blocked and not is_blocked and score > highest_score:
                 highest_score = score
                 selected_id = rid
                 selected_name = adapter.get_name()

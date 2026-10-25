@@ -17,8 +17,10 @@ class SandboxPolicy:
     read_only_root: bool = True
     disposable_tmp: bool = True
     read_only_app: bool = True
-    max_memory_mb: int = 2048
-    max_cpu_seconds: int = 30
+    enable_x11: bool = True
+    enable_wayland: bool = True
+    max_memory_mb: int = 0      # 0 = unconstrained; enforced via POSIX rlimit on Linux
+    max_cpu_seconds: int = 0    # 0 = unconstrained; enforced via POSIX rlimit on Linux
     bind_mounts: List[str] = field(default_factory=list)
     ro_bind_mounts: List[str] = field(default_factory=list)
 
@@ -40,10 +42,20 @@ class SandboxManager:
             "available": self.has_bwrap,
             "binary_path": self.bwrap_bin,
             "supported_isolations": (
-                ["user_namespace", "pid_namespace", "net_namespace", "ipc_namespace", "ro_bind_mounts", "tmpfs"]
+                [
+                    "user_namespace",
+                    "pid_namespace",
+                    "net_namespace",
+                    "ipc_namespace",
+                    "ro_bind_mounts",
+                    "tmpfs",
+                    "x11_xauthority_ro",
+                    "wayland_socket_bind",
+                ]
                 if self.has_bwrap
                 else []
             ),
+            "resource_enforcement": "posix_rlimit" if os.name != "nt" else "unsupported_on_windows",
         }
 
     def wrap_command(
@@ -51,10 +63,20 @@ class SandboxManager:
         command: List[str],
         working_dir: str,
         policy: Optional[SandboxPolicy] = None,
+        allow_unconfined: bool = False,
     ) -> List[str]:
-        """Wraps target command inside Bubblewrap sandbox if available on host."""
+        """
+        Wraps target command inside Bubblewrap sandbox if available on host.
+        Fails safely by raising SecurityViolationError if bwrap is missing and allow_unconfined is False.
+        """
         if not self.has_bwrap:
-            return command  # Fallback to direct execution with warning
+            if not allow_unconfined:
+                from zcf.core.exceptions import SecurityViolationError
+                raise SecurityViolationError(
+                    "Sandboxing is required by policy, but Bubblewrap ('bwrap') is not available on this host. "
+                    "Aborting execution to prevent unconfined host access."
+                )
+            return command
 
         pol = policy or SandboxPolicy()
         wrapped = [self.bwrap_bin]
@@ -88,9 +110,26 @@ class SandboxManager:
             else:
                 wrapped.extend(["--bind", working_dir, working_dir])
 
-        # Extra read-only mounts (e.g. display sockets, font configs)
+        # Graphical display integration (explicitly restricted to display sockets/tokens, never entire runtime dirs)
+        if pol.enable_x11:
+            if os.path.exists("/tmp/.X11-unix"):
+                wrapped.extend(["--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix"])
+            # Bind the specific Xauthority file if present
+            xauth = os.environ.get("XAUTHORITY") or os.path.expanduser("~/.Xauthority")
+            if xauth and os.path.isfile(xauth):
+                wrapped.extend(["--ro-bind", xauth, xauth])
+
+        if pol.enable_wayland:
+            xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+            if xdg_runtime:
+                wayland_display = os.environ.get("WAYLAND_DISPLAY", "wayland-0")
+                wayland_sock = os.path.join(xdg_runtime, wayland_display)
+                if os.path.exists(wayland_sock):
+                    wrapped.extend(["--bind", wayland_sock, wayland_sock])
+
+        # Extra read-only mounts (e.g. font configs, certificates)
         for ro_path in pol.ro_bind_mounts:
-            if os.path.exists(ro_path):
+            if os.path.exists(ro_path) and ro_path not in wrapped:
                 wrapped.extend(["--ro-bind", ro_path, ro_path])
 
         # Bind extra permitted writable locations (e.g. isolated application prefix)

@@ -28,23 +28,37 @@ class DesktopIntegrator:
 
     @staticmethod
     def escape_exec_path(path: str) -> str:
-        """
+        r"""
         Escapes paths for Freedesktop Exec keys according to specification:
         - Backslashes are escaped as '\\'
         - Double quotes are escaped as '\"'
+        - Dollar signs are escaped as '\$'
         - Percent signs must be escaped as '%%' to prevent mistaken field-code expansion
-        - Strips newlines to prevent command injection
+        - Rejects newlines and control characters to prevent command injection
         """
-        clean_path = re.sub(r"[\r\n]+", "", str(path))
-        escaped = clean_path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+        raw = str(path)
+        if any(c in raw for c in ("\r", "\n")) or any(ord(c) < 32 for c in raw if c != "\t"):
+            raise ValueError(f"Path contains forbidden newline or control characters: {repr(path)}")
+        escaped = raw.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("%", "%%")
         return f'"{escaped}"'
+
+    @staticmethod
+    def escape_desktop_string(val: str) -> str:
+        """
+        Escapes string values according to Freedesktop Desktop Entry Specification:
+        - Backslashes are escaped as '\\'
+        - Rejects unescaped newlines to prevent key injection into the entry file.
+        """
+        raw = str(val)
+        if any(c in raw for c in ("\r", "\n")) or any(ord(c) < 32 for c in raw if c != "\t"):
+            raise ValueError(f"Desktop value contains forbidden newline or control characters: {repr(val)}")
+        return raw.replace("\\", "\\\\")
 
     @staticmethod
     def sanitize_desktop_value(val: str) -> str:
         """
-        Sanitizes desktop entry string values according to Freedesktop Desktop Entry Specification:
-        Strips newline characters (\r, \n) to prevent key injection into the entry file.
-        Strips non-printable control characters.
+        Sanitizes free-form desktop entry string values (like application display name):
+        Converts line breaks to spaces and strips non-printable control characters.
         """
         if not val:
             return ""
@@ -77,6 +91,9 @@ class DesktopIntegrator:
         Generates a .desktop launcher for the target application and updates the desktop database.
         Returns the path to the created .desktop file.
         """
+        if any(c in artifact_path for c in ("\r", "\n")) or any(ord(c) < 32 for c in artifact_path if c != "\t"):
+            raise ValueError(f"Invalid artifact path: contains newline or control characters: {repr(artifact_path)}")
+
         abs_path = os.path.abspath(artifact_path)
         SecurityController().validate_execution_safety(abs_path)
 
@@ -88,6 +105,7 @@ class DesktopIntegrator:
 
         category = "Game;" if any("d3d" in d.lower() for d in app.declared_dependencies) else "Utility;Office;"
         escaped_exec = self.escape_exec_path(abs_path)
+        escaped_artifact = self.escape_desktop_string(abs_path)
         icon_name = self.sanitize_desktop_value(icon_path or "application-x-executable")
 
         desktop_entry = (
@@ -102,7 +120,7 @@ class DesktopIntegrator:
             "Terminal=false\n"
             f"Categories={category}\n"
             "StartupNotify=true\n"
-            f"X-ZCF-Artifact={abs_path}\n"
+            f"X-ZCF-Artifact={escaped_artifact}\n"
             f"X-ZCF-SHA256={app.sha256}\n"
             "MimeType=application/x-msdos-program;application/x-msdownload;\n"
         )
@@ -133,6 +151,7 @@ class DesktopIntegrator:
             target_path = artifact_path_or_id
         else:
             abs_target = os.path.abspath(artifact_path_or_id)
+            escaped_target = abs_target.replace("\\", "\\\\")
             # Find matching .desktop by X-ZCF-Artifact header or calculated path
             for fname in os.listdir(self.app_dir):
                 if fname.startswith("zcf-") and fname.endswith(".desktop"):
@@ -140,7 +159,7 @@ class DesktopIntegrator:
                     try:
                         with open(fpath, "r", encoding="utf-8") as f:
                             content = f.read()
-                            if f"X-ZCF-Artifact={abs_target}" in content:
+                            if f"X-ZCF-Artifact={abs_target}" in content or f"X-ZCF-Artifact={escaped_target}" in content:
                                 target_path = fpath
                                 break
                     except Exception:

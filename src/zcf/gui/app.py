@@ -49,7 +49,8 @@ class ZCFControlCenter:
         self.component_mgr = WindowsComponentManager()
         self.diag_engine = DiagnosticEngine()
         self.remediator = AutomatedRemediator()
-        self.prefix_mgr = WinePrefixManager()
+        self.prefix_mgr = WinePrefixManager(base_dir=os.path.expanduser("~/.zcf/prefixes"))
+        self.proton_prefix_mgr = WinePrefixManager(base_dir=os.path.expanduser("~/.zcf/proton_prefixes"))
         self.notifier = DesktopNotifier()
 
         self.current_app_path: Optional[str] = None
@@ -575,20 +576,24 @@ class ZCFControlCenter:
         # Prefix treeview list
         self.tree_prefixes = ttk.Treeview(
             card,
-            columns=("name", "size", "arch", "locked", "path"),
+            columns=("runtime", "name", "size", "arch", "persistent", "locked", "path"),
             show="headings",
             height=6,
         )
+        self.tree_prefixes.heading("runtime", text="Runtime")
         self.tree_prefixes.heading("name", text="Application / ID")
         self.tree_prefixes.heading("size", text="Disk Size")
         self.tree_prefixes.heading("arch", text="Architecture")
+        self.tree_prefixes.heading("persistent", text="Persistence")
         self.tree_prefixes.heading("locked", text="Active Lock")
         self.tree_prefixes.heading("path", text="Filesystem Location")
-        self.tree_prefixes.column("name", width=180)
-        self.tree_prefixes.column("size", width=90)
-        self.tree_prefixes.column("arch", width=90)
-        self.tree_prefixes.column("locked", width=90)
-        self.tree_prefixes.column("path", width=300)
+        self.tree_prefixes.column("runtime", width=80)
+        self.tree_prefixes.column("name", width=160)
+        self.tree_prefixes.column("size", width=80)
+        self.tree_prefixes.column("arch", width=80)
+        self.tree_prefixes.column("persistent", width=90)
+        self.tree_prefixes.column("locked", width=80)
+        self.tree_prefixes.column("path", width=260)
         self.tree_prefixes.pack(fill="both", expand=True, pady=8)
 
         btn_box = ttk.Frame(card, style="Card.TFrame")
@@ -596,7 +601,7 @@ class ZCFControlCenter:
 
         btn_clean = ttk.Button(
             btn_box,
-            text="🧹  Clean Stale Prefixes (Free Disk Space)",
+            text="🧹  Clean Stale Disposable Prefixes (Safe)",
             style="Primary.TButton",
             command=self._on_clean_prefixes,
         )
@@ -613,37 +618,49 @@ class ZCFControlCenter:
         self._refresh_prefix_stats()
 
     def _refresh_prefix_stats(self):
-        prefixes = self.prefix_mgr.list_prefixes()
-        total_mb = sum(p.size_mb for p in prefixes)
+        wine_prefixes = self.prefix_mgr.list_prefixes()
+        proton_prefixes = self.proton_prefix_mgr.list_prefixes()
+        all_prefixes = wine_prefixes + proton_prefixes
+        total_mb = sum(p.size_mb for p in all_prefixes)
         self.lbl_prefix_stats.config(
-            text=f"Prefix Root: {self.prefix_mgr.base_dir}\nActive Isolated Prefixes: {len(prefixes)} • Total Storage: {round(total_mb, 2)} MB"
+            text=f"Wine Root: {self.prefix_mgr.base_dir} | Proton Root: {self.proton_prefix_mgr.base_dir}\n"
+                 f"Managed Prefixes: {len(all_prefixes)} (Wine: {len(wine_prefixes)}, Proton: {len(proton_prefixes)}) • Total Storage: {round(total_mb, 2)} MB"
         )
 
         for item in self.tree_prefixes.get_children():
             self.tree_prefixes.delete(item)
 
-        for p in prefixes:
+        for p in wine_prefixes:
             locked_str = "🔒 Active" if p.is_locked else "Ready"
-            self.tree_prefixes.insert("", "end", values=(p.app_name, f"{p.size_mb} MB", p.architecture, locked_str, p.prefix_path))
+            persist_str = "Durable" if p.is_persistent else "Disposable"
+            self.tree_prefixes.insert("", "end", values=("Wine", p.app_name, f"{p.size_mb} MB", p.architecture, persist_str, locked_str, p.prefix_path))
+
+        for p in proton_prefixes:
+            locked_str = "🔒 Active" if p.is_locked else "Ready"
+            persist_str = "Durable" if p.is_persistent else "Disposable"
+            self.tree_prefixes.insert("", "end", values=("Proton", p.app_name, f"{p.size_mb} MB", p.architecture, persist_str, locked_str, p.prefix_path))
 
     def _on_clean_prefixes(self):
-        preview = self.prefix_mgr.preview_cleanup(max_age_days=14, include_disposable_only=True)
-        count = len(preview["candidates"])
-        reclaim_mb = preview["total_reclaimable_mb"]
+        wine_preview = self.prefix_mgr.preview_cleanup(max_age_days=14, include_disposable_only=True)
+        proton_preview = self.proton_prefix_mgr.preview_cleanup(max_age_days=14, include_disposable_only=True)
+        candidates = wine_preview["candidates"] + proton_preview["candidates"]
+        reclaim_mb = round(wine_preview["total_reclaimable_mb"] + proton_preview["total_reclaimable_mb"], 2)
 
-        if count == 0:
-            self._show_info("Storage Clean", "No stale temporary prefixes found to clean.")
+        if not candidates:
+            self._show_info("Storage Clean", "No stale disposable prefixes found eligible to clean.\nDurable application prefixes are preserved.")
             return
 
         confirm = self._ask_yes_no(
-            "Confirm Storage Cleanup",
-            f"Found {count} stale prefix container(s) eligible for cleanup.\n\n"
+            "Confirm Safe Storage Cleanup",
+            f"Found {len(candidates)} stale disposable prefix container(s) eligible for cleanup.\n\n"
             f"Recoverable Disk Space: {reclaim_mb} MB\n\n"
-            f"Proceed with safe cleanup?",
+            f"All persistent application data will be preserved. Proceed?",
         )
         if confirm:
-            cleaned = self.prefix_mgr.cleanup_stale_prefixes(max_age_days=14)
-            self._show_info("Storage Maintenance", f"Cleaned {cleaned} stale temporary prefixes ({reclaim_mb} MB freed).")
+            cleaned_wine = self.prefix_mgr.cleanup_stale_prefixes(max_age_days=14)
+            cleaned_proton = self.proton_prefix_mgr.cleanup_stale_prefixes(max_age_days=14)
+            cleaned = cleaned_wine + cleaned_proton
+            self._show_info("Storage Maintenance", f"Cleaned {cleaned} stale disposable prefixes ({reclaim_mb} MB freed).")
             self._refresh_prefix_stats()
 
     def _on_open_prefix_folder(self):

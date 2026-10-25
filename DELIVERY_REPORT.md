@@ -3,9 +3,9 @@
 **Project Name:** Zyntrix Compatibility Fabric (ZCF)  
 **Organization:** Zyntrix Labs  
 **Document:** `DELIVERY_REPORT.md`  
-**Date of Completion:** October 24, 2026  
+**Date of Completion:** October 25, 2026  
 **Auditor & Lead Autonomous Engineer:** Antigravity Autonomous Engineering Agent  
-**Framework Version:** `v0.2.0` (Production Distro-Grade Release)  
+**Framework Version:** `v0.2.0` (Production Distro-Grade Release — Milestone 2 Verified)  
 **Core Framework License:** Apache License, Version 2.0  
 
 ---
@@ -25,8 +25,8 @@ ZCF is a distribution-independent, open-source application compatibility platfor
 6. **Shell Autocompletion:** Native tab-completion scripts for Bash, Zsh, and Fish shells (`data/completions/`).
 7. **Distribution Manual Pages:** Full groff/roff manual page authored and installed (`docs/man/zcf.1`).
 8. **Native Package Distribution:** Tested build script (`packaging/build_distro_packages.sh`) producing verified Debian package (`build/zcf_0.2.0-1_all.deb`), installed and tested via `dpkg -i` on Ubuntu 26.04 LTS.
-9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), 1-click prefix disk cleaner, and 1-click Start Menu / App Grid integration (`zcf integrate`).
-10. **Automated Test Suite & Security Hardening:** 65 unit and integration tests across 20 test suites passing 100% across both Windows 11 host and Ubuntu 26.04 Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, deadline-based timeouts, provenance evidence integrity, and non-stub component management.
+9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), dual-runtime Wine and Proton prefix lifecycle management, and 1-click Start Menu / App Grid integration (`zcf integrate`).
+10. **Automated Test Suite & Security Hardening:** 95 unit and integration tests across 21 test suites passing 100% across both Windows 11 host and Ubuntu Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, monotonic deadline-based streaming timeouts, POSIX resource limits, provenance evidence integrity, and non-stub component management.
 11. **Continuous Integration & Developer Guides:** GitHub Actions CI matrix workflow (`.github/workflows/ci.yml`), Runtime Adapter Authoring Guide (`docs/ADAPTER_AUTHORING.md`), Compatibility Profile Contribution Guidelines (`docs/CONTRIBUTING_PROFILES.md`), and Security Model Specification (`docs/SECURITY_MODEL.md`).
 
 ---
@@ -290,14 +290,58 @@ man zcf
 
 ## 7. Test Results Summary
 
-| Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS |
+| Metric | Windows 11 Pro Host | WSL2 Ubuntu 24.04/26.04 LTS (xvfb) |
 | :--- | :--- | :--- |
-| **Total Test Files** | 20 | 20 |
-| **Total Test Cases** | 57 | 57 |
-| **Passing Tests** | 57 (100%) | 57 (100%) |
+| **Total Test Files** | 21 | 21 |
+| **Total Test Cases** | 95 | 95 |
+| **Passing Tests** | 95 (100%) | 95 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 6.368s | 10.994s |
+| **Skipped Tests** | 0 (0%) | 0 (0%) |
+| **Execution Duration**| 14.681s | 17.599s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |
+
+---
+
+## 8. Milestone 2 Implementation Summary: Prefix Data Safety, Process Lifecycle & Trust Integrity
+
+1. **Priority 0 — Prefix Data Safety & Safe Lifecycle:**
+   - Defaulted `is_persistent` to `True`. Prefixes with missing or corrupted metadata are strictly preserved.
+   - Live usage tracking updates `last_used_at` timestamp.
+   - Guaranteed dry-run execution produces zero filesystem changes or metadata records.
+   - Control Center GUI (`ZCFControlCenter`) features unified dual-runtime management displaying both Wine and Proton prefixes with runtime tags and persistence indicators.
+   - Re-evaluates cleanup eligibility immediately before deletion, strictly contained within configured root directories.
+
+2. **Priority 0 — Seed Data Provenance & Migration:**
+   - Downgraded synthetic placeholder profiles (Notepad++, FTL, F-Droid) to unverified community demo entries (`COMMUNITY_UNTESTED`).
+   - Seeded genuine automated test fixture profiles computed from actual fixture bytes (`valid_pe32plus.exe`, `valid_apk.apk`, `arm64_busybox`).
+   - Implemented idempotent versioned database migration (`v2` schema marker with `db_meta.json`).
+   - Required structured test evidence for verification promotion and rejected placeholder hashes.
+   - Validated imported bundles with schema verification, entry count checking, and atomic rollback on error.
+
+3. **Priority 1 — Process Lifecycle & Resource Controls:**
+   - Sliced non-blocking queue reader (25 lines per batch) with continuous monotonic deadline checks to prevent starvation under rapid stdout flood.
+   - Bounded memory for queue (1000 items) and captured output (512 KB cap).
+   - Unconditional process-group termination (`child_pgid = process.pid` via `os.killpg(SIGTERM)` -> 0.4s grace period -> `os.killpg(SIGKILL)`) ensuring surviving descendants are reaped even if the immediate parent exited.
+   - POSIX resource limits (`RLIMIT_AS` and `RLIMIT_CPU`) enforced via `preexec_fn`.
+   - Guaranteed virtual display cleanup (`display_mgr.stop()`) on all exit paths in `finally:`.
+
+4. **Priority 1 — Mandatory Prerequisites & Adapters:**
+   - Hard prerequisite validation for Proton: requires Vulkan driver when DXVK acceleration is enabled; missing Vulkan marks candidate ineligible and blocked.
+   - Hard prerequisite validation for Waydroid: requires active Wayland compositor and `/dev/binder` driver; missing either blocks candidate.
+   - Distinguished Android APK installation vs launch command generation.
+   - Removed automatic package manager installation for Proton; provided manual guidance.
+
+5. **Priority 1 — Real Component Verification:**
+   - Required ALL verification DLLs to exist in `system32` or `syswow64` (no partial passes).
+   - Removed metadata fallback for verification; disk presence is truth.
+   - Added `assurance_level="FILESYSTEM_SIGNATURE_PRESENCE"`.
+   - Cleaned up stale metadata if installation or verification fails.
+   - Subprocess deadline enforcement and process killing on timeout for Winetricks.
+
+6. **Priority 2 — Desktop-Entry Path Sanitization:**
+   - Strictly rejected paths containing newlines or control characters with `ValueError`.
+   - Properly escaped `%` to `%%`, `$` to `\$`, `"` to `\"`, and `\` to `\\` according to Freedesktop Exec specification.
+   - Escaped `X-ZCF-Artifact` and ensured symmetric reversible unintegration.
 
 ---
 

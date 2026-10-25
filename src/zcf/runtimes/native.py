@@ -60,17 +60,25 @@ class NativeAdapter(BaseRuntimeAdapter):
         if env.os_name == "linux":
             if app.format == BinaryFormat.PE:
                 errors.append("Windows PE executables cannot run natively on Linux; requires Wine or Proton.")
+            elif app.format == BinaryFormat.ARCHIVE:
+                errors.append(f"Archive / package format '{app.format.value}' cannot execute natively on Linux; requires container or runtime.")
             elif app.format == BinaryFormat.ELF:
                 if app.architecture != Architecture.ALL and app.architecture.value != env.architecture:
                     errors.append(
                         f"Architecture mismatch: binary is {app.architecture.value}, host is {env.architecture}; requires emulation."
                     )
+            elif app.format not in (BinaryFormat.ELF, BinaryFormat.SCRIPT):
+                errors.append(f"Format '{app.format.value}' is not supported for native Linux execution.")
         elif env.os_name == "windows":
             if app.format == BinaryFormat.ELF:
                 errors.append("Linux ELF executables cannot run natively on Windows host; requires WSL2 or VM.")
+            elif app.format == BinaryFormat.ARCHIVE:
+                errors.append(f"Archive / package format '{app.format.value}' cannot execute natively on Windows.")
             elif app.format == BinaryFormat.PE:
                 if app.architecture.value not in ("x86_64", "i386", env.architecture):
                     errors.append(f"Architecture mismatch: {app.architecture.value} on {env.architecture} Windows")
+            elif app.format not in (BinaryFormat.PE, BinaryFormat.SCRIPT):
+                errors.append(f"Format '{app.format.value}' is not supported for native Windows execution.")
 
         return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 

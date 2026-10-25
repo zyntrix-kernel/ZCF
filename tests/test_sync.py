@@ -55,6 +55,110 @@ class TestCompatibilitySync(unittest.TestCase):
         self.assertIsNotNone(trusted_entry)
         self.assertEqual(trusted_entry.provenance_tier.value, "maintainer_verified")
 
+    def test_import_malformed_entry_fails_and_rolls_back(self):
+        """Atomic rollback ensures one malformed record does not partially apply."""
+        from zcf.core.exceptions import DatabaseError
+
+        fresh_db_dir = os.path.join(self.test_dir, "rollback_db")
+        fresh_db = CompatibilityDatabase(storage_dir=fresh_db_dir)
+        fresh_sync = CompatibilitySyncManager(fresh_db)
+
+        # Bundle with 1 valid entry followed by 1 invalid entry (path traversal)
+        malformed_bundle = {
+            "bundle_version": "1.0",
+            "entry_count": 2,
+            "entries": [
+                {
+                    "entry_id": "valid_import_record",
+                    "application_name": "Valid App",
+                    "target_sha256": "a" * 64,
+                    "target_format": "pe",
+                    "target_architecture": "x86_64",
+                    "status": "untested",
+                    "last_verified": "2026-10-25T00:00:00Z",
+                    "recommended_runtime": "runtime.wine",
+                },
+                {
+                    "entry_id": "../../etc/evil_import",
+                    "application_name": "Evil App",
+                    "target_sha256": "b" * 64,
+                    "target_format": "pe",
+                    "target_architecture": "x86_64",
+                    "status": "untested",
+                    "last_verified": "2026-10-25T00:00:00Z",
+                },
+            ],
+        }
+        bundle_path = os.path.join(self.test_dir, "malformed_bundle.json")
+        with open(bundle_path, "w", encoding="utf-8") as f:
+            json.dump(malformed_bundle, f)
+
+        with self.assertRaises(DatabaseError):
+            fresh_sync.import_bundle(bundle_path)
+
+        # Atomic rollback verification: valid_import_record must NOT have been saved!
+        self.assertIsNone(fresh_db.get_by_id("valid_import_record"))
+
+    def test_import_entry_count_mismatch_fails(self):
+        """Discrepancies between declared count and actual entries must be rejected."""
+        from zcf.core.exceptions import DatabaseError
+
+        mismatch_bundle = {
+            "bundle_version": "1.0",
+            "entry_count": 5,
+            "entries": [
+                {
+                    "entry_id": "single_entry",
+                    "application_name": "Single App",
+                    "target_sha256": "c" * 64,
+                    "target_format": "pe",
+                    "target_architecture": "x86_64",
+                    "status": "untested",
+                    "last_verified": "2026-10-25T00:00:00Z",
+                }
+            ],
+        }
+        bundle_path = os.path.join(self.test_dir, "mismatch_bundle.json")
+        with open(bundle_path, "w", encoding="utf-8") as f:
+            json.dump(mismatch_bundle, f)
+
+        with self.assertRaises(DatabaseError):
+            self.sync.import_bundle(bundle_path)
+
+    def test_import_forged_placeholder_hash_always_downgraded(self):
+        """Even with trust_external_provenance=True, placeholder hashes are never trusted."""
+        forged_bundle = {
+            "bundle_version": "1.0",
+            "entry_count": 1,
+            "entries": [
+                {
+                    "entry_id": "forged_app",
+                    "application_name": "Forged App",
+                    "target_sha256": "8b3a72d1194e8c5671234908ef1234567890abcdef1234567890abcdef123456",
+                    "target_format": "pe",
+                    "target_architecture": "x86_64",
+                    "status": "verified_compatible",
+                    "provenance_tier": "maintainer_verified",
+                    "evidence_status": "verified",
+                    "last_verified": "2026-10-25T00:00:00Z",
+                }
+            ],
+        }
+        bundle_path = os.path.join(self.test_dir, "forged_bundle.json")
+        with open(bundle_path, "w", encoding="utf-8") as f:
+            json.dump(forged_bundle, f)
+
+        fresh_db_dir = os.path.join(self.test_dir, "forged_test_db")
+        fresh_db = CompatibilityDatabase(storage_dir=fresh_db_dir)
+        fresh_sync = CompatibilitySyncManager(fresh_db)
+
+        # Even with trust_external_provenance=True
+        fresh_sync.import_bundle(bundle_path, trust_external_provenance=True)
+        imported = fresh_db.get_by_id("forged_app")
+        self.assertIsNotNone(imported)
+        self.assertEqual(imported.provenance_tier.value, "community_untested")
+        self.assertEqual(imported.evidence_status.value, "community_reported")
+
 
 if __name__ == "__main__":
     unittest.main()

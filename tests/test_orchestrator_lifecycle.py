@@ -171,6 +171,69 @@ class TestOrchestratorLifecycle(unittest.TestCase):
         self.assertFalse(res.success)
         self.assertIn("timed out", res.stdout)
 
+    def test_orchestrator_continuous_output_timeout(self):
+        """Continuous output spam must not starve the deadline check."""
+        spam_script = os.path.join(self.temp_dir, "spam_process.py")
+        with open(spam_script, "w", encoding="utf-8") as f:
+            f.write(
+                'import sys, time\n'
+                'while True:\n'
+                '    sys.stdout.write("Spamming rapid stdout output line\\n")\n'
+                '    sys.stdout.flush()\n'
+            )
+
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=spam_script,
+            use_sandbox=False,
+            timeout=1,
+        )
+        self.assertEqual(res.exit_code, 124)
+        self.assertFalse(res.success)
+        self.assertIn("timed out", res.stdout)
+
+    def test_orchestrator_output_truncation_bounded(self):
+        """Massive stdout floods must be capped at 512 KB to prevent memory exhaustion."""
+        flood_script = os.path.join(self.temp_dir, "flood_process.py")
+        with open(flood_script, "w", encoding="utf-8") as f:
+            f.write(
+                'import sys\n'
+                'line = "A" * 200 + "\\n"\n'
+                'for _ in range(4000):\n'
+                '    sys.stdout.write(line)\n'
+                'sys.stdout.flush()\n'
+            )
+
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=flood_script,
+            use_sandbox=False,
+            timeout=10,
+        )
+        self.assertEqual(res.exit_code, 0)
+        self.assertTrue(res.success)
+        # Capture buffer capped at 512KB + warning notice
+        self.assertLessEqual(len(res.stdout), 550 * 1024)
+        self.assertIn("Process output exceeded 512 KB", res.stdout)
+
+    @patch("zcf.execution.display.VirtualDisplayManager.is_supported", return_value=True)
+    @patch("zcf.execution.display.VirtualDisplayManager.start")
+    @patch("zcf.execution.display.VirtualDisplayManager.stop")
+    def test_display_cleanup_on_exception(self, mock_stop, mock_start, mock_supported):
+        """Virtual display must be stopped safely even if execution raises an exception."""
+        mock_start.return_value = {"DISPLAY": ":99"}
+        script_file = os.path.join(self.temp_dir, "test_err.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write('print("test")\n')
+
+        with patch("zcf.security.controller.SecurityController.sanitize_env_vars", side_effect=RuntimeError("env error")):
+            with self.assertRaises(RuntimeError):
+                self.orchestrator.execute_lifecycle(
+                    artifact_path=script_file,
+                    use_sandbox=False,
+                    force_headless=True,
+                )
+
+        mock_stop.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

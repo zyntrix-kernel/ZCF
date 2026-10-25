@@ -96,11 +96,9 @@ class QemuUserAdapter(BaseRuntimeAdapter):
 
     def check_prerequisites(self, app: ApplicationDescription, env: EnvironmentReport) -> List[str]:
         missing: List[str] = []
-        qemu_bin = ARCH_QEMU_BINARY_MAP.get(app.architecture)
-        if qemu_bin:
-            resolved = shutil.which(qemu_bin) or shutil.which(f"{qemu_bin}-static")
-            if not resolved:
-                missing.append(f"QEMU user emulator for {app.architecture.value} ('{qemu_bin}') is not installed.")
+        if not self.is_available(env):
+            qemu_bin = ARCH_QEMU_BINARY_MAP.get(app.architecture, "qemu-user")
+            missing.append(f"QEMU user emulator for {app.architecture.value} ('{qemu_bin}') is not installed.")
         return missing
 
     def validate(self, app: ApplicationDescription, env: EnvironmentReport) -> ValidationResult:

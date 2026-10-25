@@ -70,7 +70,8 @@ class SecurityController:
         "SECRET",
         "PASSWORD",
         "PASSWD",
-        "AUTH",
+        "AUTHORIZATION",
+        "AUTH_TOKEN",
         "CREDENTIAL",
         "PRIVATE",
         "SSH_",
@@ -131,6 +132,11 @@ class SecurityController:
         sanitized: Dict[str, str] = {}
         for k, v in env_vars.items():
             upper_k = k.upper()
+
+            # Explicit desktop display exception: XAUTHORITY is required for X11 authentication
+            if k == "XAUTHORITY":
+                sanitized[k] = v
+                continue
 
             # Always reject sensitive credentials and keys
             if any(pattern in upper_k for pattern in self.SENSITIVE_KEY_PATTERNS):
