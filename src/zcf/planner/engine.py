@@ -185,25 +185,61 @@ class CompatibilityPlanner:
 
             # Database evidence weighting by provenance tier and verification status
             if db_evidence and db_evidence.recommended_runtime == rid:
-                # Internally consistent verification check:
-                is_placeholder = False
-                if db_evidence.target_sha256:
-                    s_lower = db_evidence.target_sha256.lower()
-                    if "1234567890abcdef" in s_lower or s_lower.startswith("11112222") or s_lower.startswith("9923847192837491"):
-                        is_placeholder = True
+                from zcf.compatibility_db.database import is_placeholder_hash
+
+                # 1. Artifact identity must match exactly
+                sha_matches = (
+                    bool(app.sha256)
+                    and bool(db_evidence.target_sha256)
+                    and app.sha256.lower() == db_evidence.target_sha256.lower()
+                )
+
+                # 2. Reject synthetic benchmark boost for general apps
+                is_placeholder = is_placeholder_hash(db_evidence.target_sha256)
+                is_fixture_only = (
+                    db_evidence.provenance_tier == ProvenanceTier.DEMO_FIXTURE
+                    or db_evidence.entry_id.startswith("zcf_fixture_")
+                    or "synthetic" in db_evidence.application_name.lower()
+                    or "fixture" in db_evidence.application_name.lower()
+                ) and not ("fixture" in app.file_name.lower() or "synthetic" in app.file_name.lower())
+
+                # 3. Non-contradictory status/tier combinations
+                has_contradictory_provenance = False
+                if db_evidence.provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST):
+                    if db_evidence.evidence_status not in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED):
+                        has_contradictory_provenance = True
+                    if db_evidence.status not in (CompatibilityStatus.VERIFIED_COMPATIBLE, CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND):
+                        has_contradictory_provenance = True
+                elif db_evidence.provenance_tier == ProvenanceTier.COMMUNITY_UNTESTED:
+                    if db_evidence.evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED):
+                        has_contradictory_provenance = True
+                    if db_evidence.status == CompatibilityStatus.VERIFIED_COMPATIBLE:
+                        has_contradictory_provenance = True
 
                 is_consistent_verified = (
-                    db_evidence.provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST)
+                    sha_matches
+                    and not is_placeholder
+                    and not is_fixture_only
+                    and not has_contradictory_provenance
+                    and db_evidence.provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST)
                     and db_evidence.evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED)
                     and db_evidence.status in (CompatibilityStatus.VERIFIED_COMPATIBLE, CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND)
-                    and not is_placeholder
                 )
+
                 # Hard incompatibilities and missing critical prerequisites always override database recommendations!
                 if not candidate_blocked and eligible and is_consistent_verified:
                     score = min(score + 0.05, 1.0)
                     notes += f" [Verified in ZCF Database ({db_evidence.provenance_tier.value}): {db_evidence.status.value}]"
                 elif is_consistent_verified:
                     notes += f" [ZCF Database ({db_evidence.provenance_tier.value}): overridden by unmet host prerequisites]"
+                elif not sha_matches:
+                    notes += f" [Ignored ZCF Database: artifact SHA-256 mismatch]"
+                elif is_placeholder:
+                    notes += f" [Ignored ZCF Database: placeholder hash cannot boost score]"
+                elif is_fixture_only:
+                    notes += f" [Ignored ZCF Database: fixture-only benchmark evidence cannot boost application score]"
+                elif has_contradictory_provenance:
+                    notes += f" [Ignored ZCF Database: contradictory provenance/status combination]"
                 else:
                     notes += f" [Unverified/Community in ZCF Database: {db_evidence.status.value}]"
 
@@ -280,7 +316,10 @@ class CompatibilityPlanner:
                 safe_steps.append("Install and launch APK inside container.")
                 confidence_criteria["container_readiness"] = 0.20
 
-            if db_evidence:
+            if db_evidence and any(
+                c.runtime_id == selected_id and "Verified in ZCF Database" in c.notes
+                for c in candidates
+            ):
                 confidence_criteria["database_evidence_verified"] = 0.10
         else:
             # Handle uninstalled candidate recommendations

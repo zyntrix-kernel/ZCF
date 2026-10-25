@@ -83,8 +83,27 @@ def validate_writable_mount(
     if any(ord(c) < 32 for c in raw_str if c != "\t"):
         raise SecurityViolationError("Writable sandbox mount rejected: path contains invalid control characters.")
 
+    # 1b. Reject relative traversal ('..' components in raw input path)
+    raw_parts = [p for p in raw_str.replace("/", os.sep).replace("\\", os.sep).split(os.sep) if p]
+    if ".." in raw_parts:
+        raise SecurityViolationError("Writable sandbox mount rejected: relative traversal ('..') is strictly prohibited.")
+
+    # 1c. Safe canonicalization accounting for existing symlink ancestors
     abs_path = os.path.abspath(raw_str)
-    canonical = os.path.realpath(abs_path)
+    curr = abs_path
+    unresolved_tail: List[str] = []
+    while curr and not os.path.exists(curr):
+        parent = os.path.dirname(curr)
+        if parent == curr:
+            break
+        unresolved_tail.insert(0, os.path.basename(curr))
+        curr = parent
+
+    real_ancestor = os.path.realpath(curr) if curr and os.path.exists(curr) else os.path.realpath(abs_path)
+    if unresolved_tail:
+        canonical = os.path.join(real_ancestor, *unresolved_tail)
+    else:
+        canonical = real_ancestor
     norm = os.path.normpath(canonical)
 
     # 2. Check root filesystem
@@ -218,11 +237,15 @@ class SandboxManager:
 
         pol = policy or SandboxPolicy()
         wrapped = [self.bwrap_bin]
+        ro_targets: List[str] = []
 
         # 1. Read-only standard system directories
         if pol.read_only_root:
             for sys_dir in ("/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc"):
                 if os.path.exists(sys_dir):
+                    canonical_sys = os.path.realpath(sys_dir)
+                    if canonical_sys not in ro_targets:
+                        ro_targets.append(canonical_sys)
                     wrapped.extend(["--ro-bind", sys_dir, sys_dir])
 
         # 2. Essential virtual filesystems
@@ -243,7 +266,10 @@ class SandboxManager:
 
         # 6. Bind application working directory (read-only by default)
         if os.path.exists(working_dir):
+            canonical_wd = os.path.realpath(working_dir)
             if pol.read_only_app:
+                if canonical_wd not in ro_targets:
+                    ro_targets.append(canonical_wd)
                 wrapped.extend(["--ro-bind", working_dir, working_dir])
             else:
                 validated_wd = validate_writable_mount(working_dir, pol.allowed_prefix_roots)
@@ -267,8 +293,12 @@ class SandboxManager:
 
         # 8. Extra read-only mounts (e.g. font configs, certificates)
         for ro_path in pol.ro_bind_mounts:
-            if os.path.exists(ro_path) and ro_path not in wrapped:
-                wrapped.extend(["--ro-bind", ro_path, ro_path])
+            if ro_path and os.path.exists(ro_path):
+                canonical_ro = os.path.realpath(ro_path)
+                if canonical_ro not in ro_targets:
+                    ro_targets.append(canonical_ro)
+                if canonical_ro not in wrapped:
+                    wrapped.extend(["--ro-bind", canonical_ro, canonical_ro])
 
         # 9. Application Prefix Mount (strictly validated)
         validated_writable_mounts: List[str] = []
@@ -285,7 +315,15 @@ class SandboxManager:
             if canonical_extra not in validated_writable_mounts:
                 validated_writable_mounts.append(canonical_extra)
 
+        # 11. Conflict check: ensure no writable mount targets or aliases an already read-only mount
         for w_mount in validated_writable_mounts:
+            norm_w = os.path.normpath(w_mount)
+            for ro_m in ro_targets:
+                norm_ro = os.path.normpath(ro_m)
+                if norm_w == norm_ro:
+                    raise SecurityViolationError(
+                        f"Conflicting mount configuration: '{w_mount}' is mounted read-only and cannot be mounted writable."
+                    )
             wrapped.extend(["--bind", w_mount, w_mount])
 
         wrapped.extend(["--chdir", working_dir])

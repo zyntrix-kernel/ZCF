@@ -26,7 +26,7 @@ ZCF is a distribution-independent, open-source application compatibility platfor
 7. **Distribution Manual Pages:** Full groff/roff manual page authored and installed (`docs/man/zcf.1`).
 8. **Native Package Distribution:** Tested build script (`packaging/build_distro_packages.sh`) producing verified Debian package (`build/zcf_0.2.0-1_all.deb`), installed and tested via `dpkg -i` on Ubuntu 26.04 LTS.
 9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), dual-runtime Wine and Proton prefix lifecycle management, and 1-click Start Menu / App Grid integration (`zcf integrate`).
-10. **Automated Test Suite & Security Hardening:** 108 unit and integration tests across 21 test suites passing 100% across both Windows 11 host and Ubuntu Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, strict writable mount canonicalization and containment, workload-aware execution deadlines, truthful resource limits, provenance evidence integrity, and non-stub component management.
+10. **Automated Test Suite & Security Hardening:** 112 unit and integration tests across 21 test suites passing 100% across both Windows 11 host and Ubuntu Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, strict writable mount canonicalization, ancestor symlink validation and containment, workload-aware execution deadlines, truthful resource limits, provenance evidence integrity, and non-stub component management.
 11. **Continuous Integration & Developer Guides:** GitHub Actions CI matrix workflow (`.github/workflows/ci.yml`), Runtime Adapter Authoring Guide (`docs/ADAPTER_AUTHORING.md`), Compatibility Profile Contribution Guidelines (`docs/CONTRIBUTING_PROFILES.md`), and Security Model Specification (`docs/SECURITY_MODEL.md`).
 
 ---
@@ -293,11 +293,11 @@ man zcf
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS (xvfb) |
 | :--- | :--- | :--- |
 | **Total Test Files** | 21 | 21 |
-| **Total Test Cases** | 108 | 108 |
-| **Passing Tests** | 108 (100%) | 108 (100%) |
+| **Total Test Cases** | 112 | 112 |
+| **Passing Tests** | 112 (100%) | 112 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
 | **Skipped Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 37.200s | 23.523s |
+| **Execution Duration**| 26.410s | 35.448s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |
 
 ---

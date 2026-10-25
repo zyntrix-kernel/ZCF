@@ -146,6 +146,62 @@ class TestSandboxManager(unittest.TestCase):
             # The entire runtime dir must NOT be mounted writable
             self.assertFalse(any(wrapped[i + 1] == xdg_dir for i in bind_idx))
 
+    def test_symlink_pointing_to_sensitive_location_rejected(self):
+        """Symlink inside approved directory pointing to /etc or sensitive root is rejected."""
+        symlink_to_sys = os.path.join(self.test_dir, "evil_sys_link")
+        target_sys = "/etc" if os.name != "nt" else os.environ.get("SystemRoot", "C:\\Windows")
+        try:
+            try:
+                os.symlink(target_sys, symlink_to_sys)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlinks not supported in current environment")
+
+            # Symlink itself is inside self.test_dir, but targets sensitive root
+            with self.assertRaises(SecurityViolationError):
+                validate_writable_mount(symlink_to_sys, [self.test_dir])
+
+            # Nonexistent child under the symlink must also be safely rejected
+            nonexistent_child = os.path.join(symlink_to_sys, "nonexistent_leaf.conf")
+            with self.assertRaises(SecurityViolationError):
+                validate_writable_mount(nonexistent_child, [self.test_dir])
+        finally:
+            if os.path.islink(symlink_to_sys) or os.path.exists(symlink_to_sys):
+                try:
+                    os.unlink(symlink_to_sys)
+                except Exception:
+                    pass
+
+    def test_conflicting_read_only_and_writable_mount_rejected(self):
+        """Attempting to mount a read-only directory as writable raises SecurityViolationError."""
+        base_cmd = ["/bin/true"]
+        ro_dir = os.path.join(self.test_dir, "ro_shared")
+        os.makedirs(ro_dir, exist_ok=True)
+
+        policy = SandboxPolicy(
+            read_only_root=True,
+            allowed_prefix_roots=[self.test_dir],
+            ro_bind_mounts=[ro_dir],
+            bind_mounts=[ro_dir],  # Conflict! Same directory declared both ro and writable
+        )
+
+        with patch.object(self.mgr, "has_bwrap", True), patch.object(self.mgr, "bwrap_bin", "/usr/bin/bwrap"):
+            with self.assertRaises(SecurityViolationError) as ctx:
+                self.mgr.wrap_command(base_cmd, "/tmp", policy)
+            self.assertIn("Conflicting mount configuration", str(ctx.exception))
+
+    def test_alternate_spellings_and_redundant_separators(self):
+        """Alternate path spellings (/./ and redundant separators) resolve correctly within containment."""
+        valid_prefix = os.path.join(self.test_dir, "prefixes", ".", "sub_prefix", "..", "sub_prefix")
+        os.makedirs(valid_prefix, exist_ok=True)
+        # Traversal '..' is rejected by 1b
+        with self.assertRaises(SecurityViolationError):
+            validate_writable_mount(valid_prefix, [self.test_dir])
+
+        # Redundant separators and dot-slash without '..' are accepted within root
+        safe_spelling = os.path.join(self.test_dir, "prefixes", ".", "sub_prefix")
+        resolved = validate_writable_mount(safe_spelling, [self.test_dir])
+        self.assertEqual(resolved, os.path.realpath(safe_spelling))
+
 
 if __name__ == "__main__":
     unittest.main()
