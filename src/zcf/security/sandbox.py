@@ -16,9 +16,11 @@ class SandboxPolicy:
     isolate_network: bool = True
     read_only_root: bool = True
     disposable_tmp: bool = True
+    read_only_app: bool = True
     max_memory_mb: int = 2048
     max_cpu_seconds: int = 30
     bind_mounts: List[str] = field(default_factory=list)
+    ro_bind_mounts: List[str] = field(default_factory=list)
 
 
 class SandboxManager:
@@ -79,13 +81,23 @@ class SandboxManager:
         # Isolated user/PID namespaces
         wrapped.extend(["--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts"])
 
-        # Bind application working directory
+        # Bind application working directory (read-only by default unless explicitly granted writable)
         if os.path.exists(working_dir):
-            wrapped.extend(["--bind", working_dir, working_dir])
+            if pol.read_only_app and working_dir not in pol.bind_mounts:
+                wrapped.extend(["--ro-bind", working_dir, working_dir])
+            else:
+                wrapped.extend(["--bind", working_dir, working_dir])
 
-        # Bind extra permitted writable locations (e.g. prefix_path, /run for display sockets)
+        # Extra read-only mounts (e.g. display sockets, font configs)
+        for ro_path in pol.ro_bind_mounts:
+            if os.path.exists(ro_path):
+                wrapped.extend(["--ro-bind", ro_path, ro_path])
+
+        # Bind extra permitted writable locations (e.g. isolated application prefix)
+        # Protect against accidental host system exposure: never mount sensitive root directories writable
+        forbidden_writable = ("/", "/run", "/var", "/etc", "/usr", "/root", "/boot", "/sys")
         for extra_bind in pol.bind_mounts:
-            if os.path.exists(extra_bind):
+            if os.path.exists(extra_bind) and extra_bind not in forbidden_writable:
                 wrapped.extend(["--bind", extra_bind, extra_bind])
 
         wrapped.extend(["--chdir", working_dir])

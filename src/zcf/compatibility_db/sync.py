@@ -12,7 +12,12 @@ from typing import Any, Dict, List, Optional
 
 from zcf.compatibility_db.database import CompatibilityDatabase
 from zcf.core.exceptions import DatabaseError
-from zcf.core.models import CompatibilityEntry, CompatibilityStatus
+from zcf.core.models import (
+    CompatibilityEntry,
+    CompatibilityStatus,
+    EvidenceStatus,
+    ProvenanceTier,
+)
 
 
 class CompatibilitySyncManager:
@@ -39,8 +44,13 @@ class CompatibilitySyncManager:
         except Exception as e:
             raise DatabaseError(f"Failed to export evidence bundle: {str(e)}")
 
-    def import_bundle(self, bundle_path: str, overwrite_older: bool = True) -> int:
-        """Imports an evidence bundle, merging records with conflict resolution."""
+    def import_bundle(
+        self,
+        bundle_path: str,
+        overwrite_older: bool = True,
+        trust_external_provenance: bool = False,
+    ) -> int:
+        """Imports an evidence bundle, merging records with conflict resolution and provenance verification."""
         if not os.path.exists(bundle_path):
             raise DatabaseError(f"Bundle file not found: {bundle_path}")
 
@@ -56,6 +66,15 @@ class CompatibilitySyncManager:
         for r_entry in raw_entries:
             try:
                 entry = self.db._dict_to_entry(r_entry)
+
+                # Validate entry ID safety
+                if not entry.entry_id:
+                    continue
+
+                # Downgrade unverified third-party claims of maintainer verification unless explicitly trusted
+                if not trust_external_provenance and entry.provenance_tier == ProvenanceTier.MAINTAINER_VERIFIED:
+                    entry.provenance_tier = ProvenanceTier.COMMUNITY_UNTESTED
+                    entry.evidence_status = EvidenceStatus.COMMUNITY_REPORTED
 
                 existing = self.db.get_by_id(entry.entry_id)
                 if not existing or (overwrite_older and entry.last_verified >= existing.last_verified):

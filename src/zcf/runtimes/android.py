@@ -110,8 +110,16 @@ class AndroidContainerAdapter(BaseRuntimeAdapter):
         self, app: ApplicationDescription, context: Dict[str, Any], args: Optional[List[str]] = None
     ) -> List[str]:
         waydroid_bin = context.get("waydroid_binary") or shutil.which("waydroid") or "waydroid"
+        action = context.get("action", "install")
+        if action == "launch" and app.entry_point:
+            return [waydroid_bin, "app", "launch", app.entry_point]
         abs_target = os.path.abspath(app.artifact_path)
         return [waydroid_bin, "app", "install", abs_target]
+
+    def build_launch_command(self, package_name: str) -> List[str]:
+        """Builds command to launch an installed Android package inside Waydroid container."""
+        waydroid_bin = shutil.which("waydroid") or "waydroid"
+        return [waydroid_bin, "app", "launch", package_name]
 
     def execute(
         self,

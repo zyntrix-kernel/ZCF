@@ -70,6 +70,24 @@ class PackageInstallerBridge:
             "opensuse": "waydroid",
             "alpine": "waydroid",
         },
+        "box64": {
+            "debian": "box64",
+            "ubuntu": "box64",
+            "arch": "box64-bin",
+            "fedora": "box64",
+            "rhel": "box64",
+            "opensuse": "box64",
+            "alpine": "box64",
+        },
+        "proton": {
+            "debian": "steam",
+            "ubuntu": "steam",
+            "arch": "steam",
+            "fedora": "steam",
+            "rhel": "steam",
+            "opensuse": "steam",
+            "alpine": "steam",
+        },
     }
 
     def __init__(self, distro: Optional[str] = None):

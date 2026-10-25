@@ -16,7 +16,9 @@ from zcf.core.models import (
     CompatibilityEntry,
     CompatibilityPlan,
     EnvironmentReport,
+    EvidenceStatus,
     ExecutionMode,
+    ProvenanceTier,
     WorkloadType,
 )
 from zcf.runtimes.registry import RuntimeRegistry
@@ -163,10 +165,17 @@ class CompatibilityPlanner:
                         score = 0.90
                         notes = "Waydroid container runtime available for Android APK execution"
 
-            # Database evidence boost
+            # Database evidence weighting by provenance tier and verification status
             if db_evidence and db_evidence.recommended_runtime == rid:
-                score = min(score + 0.05, 1.0)
-                notes += f" [Verified in ZCF Database: {db_evidence.status.value}]"
+                is_verified = (
+                    db_evidence.provenance_tier in (ProvenanceTier.MAINTAINER_VERIFIED, ProvenanceTier.AUTOMATED_TEST)
+                    or db_evidence.evidence_status in (EvidenceStatus.VERIFIED, EvidenceStatus.REPRODUCED)
+                )
+                if is_verified:
+                    score = min(score + 0.05, 1.0)
+                    notes += f" [Verified in ZCF Database ({db_evidence.provenance_tier.value}): {db_evidence.status.value}]"
+                else:
+                    notes += f" [Community Reported in ZCF Database: {db_evidence.status.value}]"
 
             candidates.append(
                 CandidateEvaluation(

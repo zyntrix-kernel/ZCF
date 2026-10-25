@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from typing import Any, Callable, Dict, List, Optional
 
 from zcf.core.models import (
@@ -93,7 +94,7 @@ class NativeAdapter(BaseRuntimeAdapter):
         # Determine if script requires explicit interpreter
         if app.format == BinaryFormat.SCRIPT:
             if target.endswith(".py"):
-                interp = shutil.which("python3") or shutil.which("python") or "python3"
+                interp = sys.executable or shutil.which("python3") or shutil.which("python") or "python3"
                 return [interp, target] + app_args
             elif target.endswith(".sh"):
                 interp = shutil.which("bash") or shutil.which("sh") or "bash"

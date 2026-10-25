@@ -26,7 +26,7 @@ ZCF is a distribution-independent, open-source application compatibility platfor
 7. **Distribution Manual Pages:** Full groff/roff manual page authored and installed (`docs/man/zcf.1`).
 8. **Native Package Distribution:** Tested build script (`packaging/build_distro_packages.sh`) producing verified Debian package (`build/zcf_0.2.0-1_all.deb`), installed and tested via `dpkg -i` on Ubuntu 26.04 LTS.
 9. **Zero-Terminal Beginner UX & Standalone GUI Control Center:** Standalone GUI Control Center (`zcf-gui`, `zcf gui`), graphical modals (`zenity`/`kdialog`/`tkinter`), 1-click Windows component installer (VC++ 2015-2022, DirectX D3DX9, Wine Mono .NET, DXVK), 1-click prefix disk cleaner, and 1-click Start Menu / App Grid integration (`zcf integrate`).
-10. **Automated Test Suite:** 57 unit and integration tests across 20 test suites passing 100% across both Windows 11 host and Ubuntu 26.04 Linux (`docs/TESTING.md`).
+10. **Automated Test Suite & Security Hardening:** 64 unit and integration tests across 20 test suites passing 100% across both Windows 11 host and Ubuntu 26.04 Linux (`docs/TESTING.md`), verifying fail-closed sandboxing, deadline-based timeouts, provenance evidence integrity, and non-stub component management.
 11. **Continuous Integration & Developer Guides:** GitHub Actions CI matrix workflow (`.github/workflows/ci.yml`), Runtime Adapter Authoring Guide (`docs/ADAPTER_AUTHORING.md`), Compatibility Profile Contribution Guidelines (`docs/CONTRIBUTING_PROFILES.md`), and Security Model Specification (`docs/SECURITY_MODEL.md`).
 
 ---

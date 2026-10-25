@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
+from zcf.core.exceptions import SecurityViolationError
 from zcf.core.models import (
     ApplicationDescription,
     Architecture,
@@ -42,48 +43,103 @@ class TestOrchestratorLifecycle(unittest.TestCase):
         self.assertIn("%%20", escaped)
         self.assertIn('\\"quoted\\"', escaped)
 
+        # Test newline stripping for header injection prevention
+        malicious_name = "Super App\nExec=/tmp/malware.sh\nTerminal=true\r\nIcon=hack"
+        sanitized = DesktopIntegrator.sanitize_desktop_value(malicious_name)
+        self.assertNotIn("\n", sanitized)
+        self.assertNotIn("\r", sanitized)
+        self.assertIn("Super App", sanitized)
+
     def test_desktop_integration_and_unintegration(self):
         test_exe = os.path.abspath("fixtures/synthetic/valid_pe32plus.exe")
-        desktop_file = self.integrator.integrate(test_exe, custom_name="Test Game App")
+        desktop_file = self.integrator.integrate(test_exe, custom_name="Test Game App\nInjectedKey=evil")
         self.assertTrue(os.path.exists(desktop_file))
 
         with open(desktop_file, "r", encoding="utf-8") as f:
             content = f.read()
-            self.assertIn("Name=Test Game App", content)
+            self.assertIn("Name=Test Game App InjectedKey=evil", content)
+            self.assertNotIn("Name=Test Game App\nInjectedKey=evil", content)
             self.assertIn("Exec=zcf run", content)
             self.assertIn("X-ZCF-Artifact=", content)
 
         # Verify listing
         integrated = self.integrator.list_integrated_apps()
-        self.assertTrue(any(item["name"] == "Test Game App" for item in integrated))
+        self.assertTrue(any("Test Game App" in item["name"] for item in integrated))
 
         # Reversible unintegration
         removed = self.integrator.unintegrate(test_exe)
         self.assertTrue(removed)
         self.assertFalse(os.path.exists(desktop_file))
 
-    @patch("zcf.execution.runner.EnvironmentInspector.inspect")
-    def test_orchestrator_execute_lifecycle_native(self, mock_env_inspect):
-        mock_env_inspect.return_value = EnvironmentReport(
-            os_name="windows" if os.name == "nt" else "linux",
-            architecture="x86_64",
-            kernel_version="6.18",
-            available_runtimes=[
-                RuntimeInfo(runtime_id="runtime.native", name="Native Host Runtime", installed=True),
-            ],
-        )
+    def test_orchestrator_execute_lifecycle_native(self):
+        script_file = os.path.join(self.temp_dir, "test_native_exec.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write('print("ZCF Native Lifecycle Execution Successful")\n')
 
-        test_pe = os.path.abspath("fixtures/synthetic/valid_pe32plus.exe")
-        # In dry run mode / mock run, verify lifecycle result
         res = self.orchestrator.execute_lifecycle(
-            artifact_path=test_pe,
+            artifact_path=script_file,
             use_sandbox=False,
             timeout=10,
         )
         self.assertIsNotNone(res)
-        self.assertIsNotNone(res.effective_runtime)
+        self.assertTrue(res.success)
+        self.assertEqual(res.exit_code, 0)
+        self.assertEqual(res.effective_runtime, "runtime.native")
+        self.assertIn("ZCF Native Lifecycle Execution Successful", res.stdout)
         self.assertIsNotNone(res.effective_security_policy)
-        self.assertTrue(len(res.permitted_writable_paths) >= 1)
+
+    def test_orchestrator_execute_lifecycle_wine_dry_run(self):
+        test_pe = os.path.abspath("fixtures/synthetic/valid_pe32plus.exe")
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=test_pe,
+            use_sandbox=False,
+            dry_run=True,
+            timeout=10,
+        )
+        self.assertIsNotNone(res)
+        self.assertTrue(res.success)
+        self.assertEqual(res.exit_code, 0)
+        self.assertIn(res.effective_runtime, ("runtime.wine", "runtime.native"))
+        self.assertIn("[Dry Run]", res.stdout)
+
+    @patch("zcf.execution.runner.SandboxManager.is_sandbox_available", return_value=False)
+    def test_orchestrator_sandbox_fail_closed(self, mock_sb_avail):
+        script_file = os.path.join(self.temp_dir, "test_fail_closed.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write('print("Should not run unconfined")\n')
+
+        # use_sandbox=True and allow_unconfined=False MUST raise SecurityViolationError
+        with self.assertRaises(SecurityViolationError):
+            self.orchestrator.execute_lifecycle(
+                artifact_path=script_file,
+                use_sandbox=True,
+                allow_unconfined=False,
+                timeout=10,
+            )
+
+        # With allow_unconfined=True, it proceeds with recorded warning
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=script_file,
+            use_sandbox=True,
+            allow_unconfined=True,
+            timeout=10,
+        )
+        self.assertTrue(res.success)
+        self.assertTrue(any("unconfined" in w for w in res.security_warnings))
+
+    def test_orchestrator_deadline_timeout(self):
+        hang_script = os.path.join(self.temp_dir, "hang_process.py")
+        with open(hang_script, "w", encoding="utf-8") as f:
+            f.write('import time, sys\nsys.stdout.write("Running...\\n")\nsys.stdout.flush()\ntime.sleep(60)\n')
+
+        res = self.orchestrator.execute_lifecycle(
+            artifact_path=hang_script,
+            use_sandbox=False,
+            timeout=1,
+        )
+        self.assertEqual(res.exit_code, 124)
+        self.assertFalse(res.success)
+        self.assertIn("timed out", res.stdout)
 
 
 if __name__ == "__main__":

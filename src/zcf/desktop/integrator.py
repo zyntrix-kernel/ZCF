@@ -33,9 +33,24 @@ class DesktopIntegrator:
         - Backslashes are escaped as '\\'
         - Double quotes are escaped as '\"'
         - Percent signs must be escaped as '%%' to prevent mistaken field-code expansion
+        - Strips newlines to prevent command injection
         """
-        escaped = path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+        clean_path = re.sub(r"[\r\n]+", "", str(path))
+        escaped = clean_path.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
         return f'"{escaped}"'
+
+    @staticmethod
+    def sanitize_desktop_value(val: str) -> str:
+        """
+        Sanitizes desktop entry string values according to Freedesktop Desktop Entry Specification:
+        Strips newline characters (\r, \n) to prevent key injection into the entry file.
+        Strips non-printable control characters.
+        """
+        if not val:
+            return ""
+        clean = re.sub(r"[\r\n]+", " ", str(val))
+        clean = "".join(ch for ch in clean if ch >= " " or ch == "\t")
+        return clean.strip()
 
     def get_desktop_path_for_artifact(self, artifact_path: str, custom_name: Optional[str] = None) -> str:
         """Computes deterministic, collision-free .desktop filename for an artifact."""
@@ -66,13 +81,14 @@ class DesktopIntegrator:
         SecurityController().validate_execution_safety(abs_path)
 
         app = self.inspector.inspect(abs_path)
-        app_name = custom_name or os.path.splitext(app.file_name)[0].replace("_", " ").title()
+        raw_name = custom_name or os.path.splitext(app.file_name)[0].replace("_", " ").title()
+        app_name = self.sanitize_desktop_value(raw_name)
 
         desktop_path = self.get_desktop_path_for_artifact(abs_path, app_name)
 
         category = "Game;" if any("d3d" in d.lower() for d in app.declared_dependencies) else "Utility;Office;"
         escaped_exec = self.escape_exec_path(abs_path)
-        icon_name = icon_path or "application-x-executable"
+        icon_name = self.sanitize_desktop_value(icon_path or "application-x-executable")
 
         desktop_entry = (
             "[Desktop Entry]\n"

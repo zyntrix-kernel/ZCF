@@ -12,13 +12,13 @@
 
 ZCF enforces strict automated verification. Tests cover both positive execution paths and failure/negative paths. Speculative claims of compatibility are rejected; every capability asserted by the framework is backed by automated tests against real binaries, synthetic test fixtures, and distribution integration files.
 
-### Test Categories (20 Modules, 57 Tests)
+### Test Categories (20 Modules, 64 Tests)
 1. **Desktop UX & Beginner Dialogs (`test_desktop_ux.py`):** Tests Zenity/KDialog graphical modals, non-interactive fallbacks, and `.desktop` application menu integration.
 2. **Graphical User Interface (`test_gui.py`):** Tests standalone Tkinter/ttk `ZCFControlCenter` tabs (Launch, Runtimes, Components, Prefixes, Diag), application inspection updates, and log diagnosis without UI freezing.
-3. **Windows Component Manager (`test_components.py`):** Tests component definitions (Visual C++, DirectX D3DX9, Wine Mono, DXVK), prefix verification, automated winetricks handling, and filesystem stubs.
+3. **Windows Component Manager (`test_components.py`):** Tests component definitions (Visual C++, DirectX D3DX9, Wine Mono, DXVK), prefix verification, automated winetricks handling, failure when winetricks is missing without dummy file fabrication, non-zero installer exits, and missing DLL verification.
 4. **Prefix Lifecycle & Storage Manager (`test_prefix_lifecycle.py`):** Tests prefix metadata persistence, usage tracking, active process lock detection, disposable vs persistent preview, and safe cleanup.
 5. **Compatibility Database v2 & Provenance (`test_database_v2.py`):** Tests v2 schema validation, provenance tiers (`COMMUNITY_UNTESTED`, `AUTOMATED_TEST`, `MAINTAINER_VERIFIED`), evidence statuses, advanced queries, and community submission workflows.
-6. **Execution Lifecycle Orchestration (`test_orchestrator_lifecycle.py`):** Tests the 9-phase execution lifecycle, adapter command delegation, security policy enforcement, environment credential sanitization, and Freedesktop escaping/unintegration.
+6. **Execution Lifecycle Orchestration (`test_orchestrator_lifecycle.py`):** Tests the 9-phase execution lifecycle, native python execution, Wine dry-run orchestration, Bubblewrap fail-safe security (SecurityViolationError when sandbox is missing), monotonic deadline-based streaming timeouts, and Freedesktop escaping/unintegration.
 7. **Application Inspection Tests (`test_inspector.py`):** Validates raw PE32+, ELF64 (x86_64, AArch64), shell scripts, corrupted files, and nonexistent paths.
 8. **Mach-O Binary Parser Tests (`test_macho.py`):** Validates 32-bit, 64-bit, and Universal Fat Mach-O binary parsing, CPU subtypes, and load command verification.
 9. **Android APK Package Tests (`test_apk.py`):** Validates zip-based APK analysis, dex file counts, manifest presence, and multi-ABI native library detection.
@@ -30,10 +30,10 @@ ZCF enforces strict automated verification. Tests cover both positive execution 
 15. **Diagnostic Engine Tests (`test_diagnostics.py`):** Tests regex pattern matching against known failure signatures: missing shared libraries, missing DLLs, page faults, display server errors, and exec format errors.
 16. **Automated Remediator Tests (`test_remediator.py`):** Validates distribution-specific package command synthesis (Debian/Ubuntu, Arch, Fedora/RHEL, Alpine, openSUSE), DLL overrides, and wrapper generation.
 17. **Research Engine Tests (`test_research_engine.py`):** Tests the 11-step empirical investigation workflow, hypothesis generation with confidence scoring, REA evidence correlation, and automated knowledge base cataloging.
-18. **Knowledge Base Tests (`test_database.py`):** Tests CRUD persistence, SHA-256 indexing, and schema validation.
-19. **Compatibility Sync Tests (`test_sync.py`):** Validates portable JSON bundle export, cryptographic hashing, and cross-node database reconciliation.
-20. **Bubblewrap Sandbox Tests (`test_sandbox.py`):** Validates Bubblewrap `bwrap` command isolation, read-only system binding, network namespace policy, and fallback mechanisms.
-21. **Security Controller Tests (`test_security.py`):** Validates path traversal defenses, environment secret scrubbing, and command injection prevention.
+18. **Knowledge Base Tests (`test_database.py`):** Tests CRUD persistence, SHA-256 indexing, schema validation, and path traversal detection (`../`) in record IDs.
+19. **Compatibility Sync Tests (`test_sync.py`):** Validates portable JSON bundle export, cryptographic hashing, cross-node database reconciliation, and untrusted third-party provenance downgrading.
+20. **Bubblewrap Sandbox Tests (`test_sandbox.py`):** Validates Bubblewrap `bwrap` command isolation, read-only application and root binding, exclusion of `/run` writable bind, network namespace policy, and fallback mechanisms.
+21. **Security Controller Tests (`test_security.py`):** Validates path traversal defenses, environment secret scrubbing across modes (`minimized_desktop`, `strict_allowlist`, `filter_secrets`), and command injection prevention.
 
 ---
 
@@ -45,13 +45,13 @@ $env:PYTHONPATH="src"
 $env:ZCF_NON_INTERACTIVE="1"
 python -m unittest discover -s tests -v
 ```
-**Outcome:** Ran 57 tests in 6.368s — **OK (100% Passed)**
+**Outcome:** Ran 64 tests in 7.273s — **OK (100% Passed)**
 
 ### 2.2 Linux Environment (WSL2 Ubuntu 26.04 LTS)
 ```bash
 bash tests/run_tests.sh
 ```
-**Outcome:** Ran 57 tests in 10.994s — **OK (100% Passed)**
+**Outcome:** Ran 64 tests in 12.155s — **OK (100% Passed)**
 
 ---
 
@@ -60,8 +60,8 @@ bash tests/run_tests.sh
 | Metric | Windows 11 Pro Host | WSL2 Ubuntu 26.04 LTS |
 | :--- | :--- | :--- |
 | **Total Test Files** | 20 | 20 |
-| **Total Test Cases** | 57 | 57 |
-| **Passing Tests** | 57 (100%) | 57 (100%) |
+| **Total Test Cases** | 64 | 64 |
+| **Passing Tests** | 64 (100%) | 64 (100%) |
 | **Failed Tests** | 0 (0%) | 0 (0%) |
-| **Execution Duration**| 6.368s | 10.994s |
+| **Execution Duration**| 7.273s | 12.155s |
 | **Status** | **VERIFIED GREEN** | **VERIFIED GREEN** |

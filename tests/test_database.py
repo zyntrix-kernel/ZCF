@@ -57,6 +57,23 @@ class TestCompatibilityDatabase(unittest.TestCase):
         with self.assertRaises(DatabaseError):
             self.db.add_entry(invalid_entry)
 
+    def test_entry_id_path_traversal_prevention(self):
+        traversal_entry = CompatibilityEntry(
+            entry_id="../../etc/evil",
+            application_name="Traversal App",
+            target_sha256="1234567890abcdef" * 4,
+            target_format="pe",
+            target_architecture="x86_64",
+            status=CompatibilityStatus.UNTESTED,
+            last_verified="2026-10-24T00:00:00Z",
+        )
+
+        with self.assertRaises(DatabaseError):
+            self.db.add_entry(traversal_entry)
+
+        # Non-matching entry_id should return None safely from get_by_id without raising
+        self.assertIsNone(self.db.get_by_id("../../etc/evil"))
+
 
 if __name__ == "__main__":
     unittest.main()

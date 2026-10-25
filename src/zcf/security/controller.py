@@ -116,12 +116,18 @@ class SecurityController:
                 if any(char in arg for char in (";", "&&", "||", "`", "$(", "\n", "\r")):
                     raise SecurityViolationError(f"Command injection character detected in argument: {arg}")
 
-    def sanitize_env_vars(self, env_vars: Dict[str, str], mode: str = "filter_secrets") -> Dict[str, str]:
+    def sanitize_env_vars(self, env_vars: Dict[str, str], mode: str = "minimized_desktop") -> Dict[str, str]:
         """
         Filters host credentials and tokens from application process environment.
-        In 'filter_secrets' mode: strips all sensitive keys/tokens and preserves app/user variables.
-        In 'strict_allowlist' mode: additionally restricts variables to ALLOWLIST_DESKTOP_VARS.
+        Modes:
+        - 'filter_secrets': strips all sensitive credentials/tokens and preserves app/user variables.
+        - 'minimized_desktop': strips sensitive credentials, restricts to ALLOWLIST_DESKTOP_VARS and compatibility/app prefixes.
+        - 'strict_allowlist': strips sensitive credentials, strictly restricts to ALLOWLIST_DESKTOP_VARS and core ZCF/WINE keys.
         """
+        valid_modes = {"filter_secrets", "minimized_desktop", "strict_allowlist"}
+        if mode not in valid_modes:
+            raise ValueError(f"Unknown environment sanitization mode: '{mode}'. Valid modes are: {sorted(valid_modes)}")
+
         sanitized: Dict[str, str] = {}
         for k, v in env_vars.items():
             upper_k = k.upper()
@@ -133,7 +139,11 @@ class SecurityController:
             if mode == "strict_allowlist":
                 if k in self.ALLOWLIST_DESKTOP_VARS or k.startswith("ZCF_") or k.startswith("WINE"):
                     sanitized[k] = v
-            else:
+            elif mode == "minimized_desktop":
+                allowed_prefixes = ("ZCF_", "WINE", "PROTON_", "BOX64_", "QEMU_", "WAYDROID_", "APP_")
+                if k in self.ALLOWLIST_DESKTOP_VARS or any(k.startswith(p) for p in allowed_prefixes):
+                    sanitized[k] = v
+            else:  # filter_secrets
                 sanitized[k] = v
 
         return sanitized
@@ -153,7 +163,7 @@ class SecurityController:
             allow_root=self.allow_root,
             max_memory_mb=4096 if is_game else 2048,
             max_cpu_seconds=None if is_game else 3600,
-            writable_paths=[os.path.dirname(os.path.abspath(app.artifact_path))],
+            writable_paths=[],  # Writable paths are restricted to the isolated prefix
             environment_mode="minimized_desktop",
         )
         return policy

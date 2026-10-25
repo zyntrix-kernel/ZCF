@@ -37,8 +37,23 @@ class TestCompatibilitySync(unittest.TestCase):
         fresh_db = CompatibilityDatabase(storage_dir=fresh_db_dir)
         fresh_sync = CompatibilitySyncManager(fresh_db)
 
-        imported = fresh_sync.import_bundle(res_path)
+        imported = fresh_sync.import_bundle(res_path, trust_external_provenance=False)
         self.assertGreaterEqual(imported, 1)
+
+        # Verify untrusted external entries are safely downgraded from maintainer verified
+        notepad_entry = fresh_db.get_by_id("zcf_entry_notepad_pe")
+        self.assertIsNotNone(notepad_entry)
+        self.assertEqual(notepad_entry.provenance_tier.value, "community_untested")
+        self.assertEqual(notepad_entry.evidence_status.value, "community_reported")
+
+        # Now test with trust_external_provenance=True
+        trusted_db_dir = os.path.join(self.test_dir, "trusted_db")
+        trusted_db = CompatibilityDatabase(storage_dir=trusted_db_dir)
+        trusted_sync = CompatibilitySyncManager(trusted_db)
+        trusted_sync.import_bundle(res_path, trust_external_provenance=True)
+        trusted_entry = trusted_db.get_by_id("zcf_entry_notepad_pe")
+        self.assertIsNotNone(trusted_entry)
+        self.assertEqual(trusted_entry.provenance_tier.value, "maintainer_verified")
 
 
 if __name__ == "__main__":

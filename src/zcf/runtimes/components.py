@@ -84,17 +84,6 @@ class WindowsComponentManager:
         if not comp or not os.path.exists(prefix_path):
             return False
 
-        # Check prefix metadata file first
-        meta_file = os.path.join(prefix_path, "prefix_meta.json")
-        if os.path.exists(meta_file):
-            try:
-                with open(meta_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if component_key in data.get("installed_components", []):
-                        return True
-            except Exception:
-                pass
-
         # Check filesystem verification DLLs in system32 and syswow64
         system32 = os.path.join(prefix_path, "drive_c", "windows", "system32")
         syswow64 = os.path.join(prefix_path, "drive_c", "windows", "syswow64")
@@ -107,7 +96,21 @@ class WindowsComponentManager:
                 found = True
                 break
 
-        return found
+        if found:
+            return True
+
+        # Check prefix metadata file as secondary verification
+        meta_file = os.path.join(prefix_path, "prefix_meta.json")
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if component_key in data.get("installed_components", []):
+                        return True
+            except Exception:
+                pass
+
+        return False
 
     def install(
         self,
@@ -144,73 +147,95 @@ class WindowsComponentManager:
             installed = self.installer_bridge.install("winetricks", interactive=False)
             winetricks_bin = shutil.which("winetricks")
 
+        if not winetricks_bin:
+            err = (
+                f"Winetricks is required to install component '{comp.name}' ({comp.key}), "
+                f"but is not installed on this system. Install it via: "
+                f"{' '.join(self.installer_bridge.get_install_command('winetricks') or ['winetricks'])}"
+            )
+            log(f"[ZCF Component Manager Error] {err}")
+            return ComponentInstallResult(
+                success=False,
+                component_key=component_key,
+                component_name=comp.name,
+                verified=False,
+                output="\n".join(captured_output),
+                error=err,
+            )
+
         env = os.environ.copy()
         env["WINEPREFIX"] = prefix_path
         env["WINEDEBUG"] = "-all"
 
-        if winetricks_bin:
-            log(f"[ZCF Component Manager] Executing: {winetricks_bin} -q {comp.winetricks_verb}")
-            try:
-                proc = subprocess.Popen(
-                    [winetricks_bin, "-q", comp.winetricks_verb],
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
-                if proc.stdout:
-                    for line in proc.stdout:
-                        log(line.strip())
-                proc.wait(timeout=300)
-            except Exception as e:
-                log(f"[ZCF Component Manager Error] Winetricks execution failed: {e}")
-        else:
-            # Fallback for systems without winetricks: direct prefix configuration
-            log(f"[ZCF Component Manager] Winetricks unavailable; configuring fallback overrides for '{comp.key}'...")
-            sys32 = os.path.join(prefix_path, "drive_c", "windows", "system32")
-            os.makedirs(sys32, exist_ok=True)
-            for v_file in comp.verification_files:
-                target_stub = os.path.join(sys32, v_file)
-                if not os.path.exists(target_stub):
-                    with open(target_stub, "wb") as f:
-                        f.write(b"MZ_ZCF_MANAGED_COMPONENT_STUB")
+        log(f"[ZCF Component Manager] Executing: {winetricks_bin} -q {comp.winetricks_verb}")
+        proc_exit = 0
+        try:
+            proc = subprocess.Popen(
+                [winetricks_bin, "-q", comp.winetricks_verb],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            if proc.stdout:
+                for line in proc.stdout:
+                    log(line.strip())
+            proc_exit = proc.wait(timeout=300)
+        except Exception as e:
+            log(f"[ZCF Component Manager Error] Winetricks execution failed: {e}")
+            proc_exit = 1
 
-        # 2. Verify installation outcome
+        if proc_exit != 0:
+            err = f"Winetricks installer failed with exit code {proc_exit}."
+            log(f"[ZCF Component Manager Error] {err}")
+            return ComponentInstallResult(
+                success=False,
+                component_key=component_key,
+                component_name=comp.name,
+                verified=False,
+                output="\n".join(captured_output),
+                error=err,
+            )
+
+        # 2. Verify installation outcome on disk
         verified = self.is_installed_in_prefix(prefix_path, component_key)
         if not verified:
-            # If fallback stub exists, mark as verified
-            sys32 = os.path.join(prefix_path, "drive_c", "windows", "system32")
-            if any(os.path.exists(os.path.join(sys32, f)) for f in comp.verification_files):
-                verified = True
+            err = f"Verification failed: required DLLs ({', '.join(comp.verification_files)}) were not detected in prefix."
+            log(f"[ZCF Component Manager] Verification FAILED for '{comp.name}'.")
+            return ComponentInstallResult(
+                success=False,
+                component_key=component_key,
+                component_name=comp.name,
+                verified=False,
+                output="\n".join(captured_output),
+                error=err,
+            )
 
         # 3. Record in prefix metadata
-        if verified:
-            meta_file = os.path.join(prefix_path, "prefix_meta.json")
-            meta_data: Dict[str, Any] = {}
-            if os.path.exists(meta_file):
-                try:
-                    with open(meta_file, "r", encoding="utf-8") as f:
-                        meta_data = json.load(f)
-                except Exception:
-                    pass
-            components = meta_data.get("installed_components", [])
-            if component_key not in components:
-                components.append(component_key)
-            meta_data["installed_components"] = components
+        meta_file = os.path.join(prefix_path, "prefix_meta.json")
+        meta_data: Dict[str, Any] = {}
+        if os.path.exists(meta_file):
             try:
-                with open(meta_file, "w", encoding="utf-8") as f:
-                    json.dump(meta_data, f, indent=2)
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta_data = json.load(f)
             except Exception:
                 pass
-            log(f"[ZCF Component Manager] Verification SUCCESS for '{comp.name}'.")
-        else:
-            log(f"[ZCF Component Manager] Verification FAILED for '{comp.name}'.")
+        components = meta_data.get("installed_components", [])
+        if component_key not in components:
+            components.append(component_key)
+        meta_data["installed_components"] = components
+        try:
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump(meta_data, f, indent=2)
+        except Exception:
+            pass
+        log(f"[ZCF Component Manager] Verification SUCCESS for '{comp.name}'.")
 
         return ComponentInstallResult(
-            success=verified,
+            success=True,
             component_key=component_key,
             component_name=comp.name,
-            verified=verified,
+            verified=True,
             output="\n".join(captured_output),
-            error=None if verified else "Verification failed: required DLLs were not detected in prefix.",
+            error=None,
         )

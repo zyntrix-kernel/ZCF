@@ -29,13 +29,32 @@ class TestSecurityController(unittest.TestCase):
             "AWS_SECRET_ACCESS_KEY": "supersecret",
             "GITHUB_TOKEN": "ghp_12345",
             "APP_CONFIG": "production",
+            "RANDOM_VAR": "keep_or_drop",
         }
-        clean_env = self.security.sanitize_env_vars(dirty_env)
+        # Default minimized_desktop mode
+        clean_min = self.security.sanitize_env_vars(dirty_env, mode="minimized_desktop")
+        self.assertIn("PATH", clean_min)
+        self.assertIn("APP_CONFIG", clean_min)
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", clean_min)
+        self.assertNotIn("GITHUB_TOKEN", clean_min)
+        self.assertNotIn("RANDOM_VAR", clean_min)
 
-        self.assertIn("PATH", clean_env)
-        self.assertIn("APP_CONFIG", clean_env)
-        self.assertNotIn("AWS_SECRET_ACCESS_KEY", clean_env)
-        self.assertNotIn("GITHUB_TOKEN", clean_env)
+        # Strict allowlist mode
+        clean_strict = self.security.sanitize_env_vars(dirty_env, mode="strict_allowlist")
+        self.assertIn("PATH", clean_strict)
+        self.assertNotIn("APP_CONFIG", clean_strict)
+        self.assertNotIn("RANDOM_VAR", clean_strict)
+
+        # Filter secrets only mode
+        clean_filter = self.security.sanitize_env_vars(dirty_env, mode="filter_secrets")
+        self.assertIn("PATH", clean_filter)
+        self.assertIn("APP_CONFIG", clean_filter)
+        self.assertIn("RANDOM_VAR", clean_filter)
+        self.assertNotIn("GITHUB_TOKEN", clean_filter)
+
+        # Invalid mode
+        with self.assertRaises(ValueError):
+            self.security.sanitize_env_vars(dirty_env, mode="invalid_mode")
 
 
 if __name__ == "__main__":

@@ -28,11 +28,17 @@ All environment variables matching sensitive patterns (`TOKEN`, `KEY`, `SECRET`,
 
 ---
 
-## 3. Bubblewrap Sandbox Policy
+## 3. Bubblewrap Sandbox Policy & Fail-Closed Enforcement
 
-When sandboxing is active, `SandboxManager` wraps the target invocation:
+ZCF adheres to strict fail-closed container isolation:
+1. **Fail-Closed Default:** If `use_sandbox=True` is configured and Bubblewrap is not installed or available, execution halts immediately with a `SecurityViolationError`. Unconfined execution is never silently permitted; callers must explicitly pass `allow_unconfined=True` to execute without a sandbox.
+2. **Read-Only System & App Filesystems:** Operating system directories (`/usr`, `/lib`, `/bin`, `/etc`) and the application directory (`<app_dir>`) are mounted strictly read-only (`--ro-bind`). Untrusted binaries cannot mutate host binaries or their own source directory.
+3. **Restricted Writable Scope:** Writable access is confined exclusively to the isolated application prefix (`<prefix_path>`). Root system paths and `/run` are strictly prohibited from writable bind mounts.
+4. **Selective Display Sockets:** GUI applications access the display server via selective socket binding (`/tmp/.X11-unix` and `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`), completely avoiding exposing host runtime directories or system daemons.
+5. **Desktop Entry Protection:** All launcher generation paths sanitize newline characters (`\r`, `\n`) and non-printable control characters, neutralizing `.desktop` key injection attacks.
+6. **Process Group Termination:** Processes that exceed execution deadlines are terminated at the process-group level (`os.killpg`) to eliminate hung orphan child processes.
 
-```
+```bash
 bwrap \
   --ro-bind /usr /usr \
   --ro-bind /lib /lib \
@@ -44,7 +50,7 @@ bwrap \
   --unshare-pid \
   --unshare-ipc \
   --unshare-uts \
-  --bind <app_dir> <app_dir> \
+  --ro-bind <app_dir> <app_dir> \
   --bind <prefix_path> <prefix_path> \
   --chdir <app_dir> \
   -- <command>

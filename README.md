@@ -3,7 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: Cross-Distribution](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-green.svg)](#)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#)
-[![Tests: 57 Passed (100%)](https://img.shields.io/badge/Tests-57%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Tests: 64 Passed (100%)](https://img.shields.io/badge/Tests-64%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
 [![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](.github/workflows/ci.yml)
 [![Release: v0.2.0 Distro-Grade](https://img.shields.io/badge/Release-v0.2.0%20Distro--Grade-blue.svg)](#)
 [![REA: 6.7.0 Verified](https://img.shields.io/badge/REA-6.7.0%20Verified-purple.svg)](docs/REA_SETUP.md)
@@ -174,7 +174,7 @@ python -m unittest discover -s tests -v
 bash tests/run_tests.sh
 ```
 
-All **57 automated tests** across **20 test suites** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
+All **64 automated tests** across **20 test suites** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2).
 
 ---
 

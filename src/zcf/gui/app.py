@@ -354,13 +354,16 @@ class ZCFControlCenter:
             self._show_warning("No File", "Please select a valid executable file first.")
             return
 
+        use_sandbox = self.var_sandbox.get()
+        force_headless = self.var_headless.get()
+
         def run_worker():
             orchestrator = ExecutionOrchestrator()
             try:
                 orchestrator.run(
                     artifact_path=path,
-                    use_sandbox=self.var_sandbox.get(),
-                    force_headless=self.var_headless.get(),
+                    use_sandbox=use_sandbox,
+                    force_headless=force_headless,
                     auto_install=True,
                 )
             except Exception as ex:
@@ -745,12 +748,20 @@ class ZCFControlCenter:
             self._show_info("No Fix Pending", "Diagnose a log first to discover recommended fixes.")
             return
 
-        cmd = " && ".join(self.last_remediation_commands)
-        confirm = self._ask_yes_no("Apply Fix", f"Execute the following system fix command?\n\n{cmd}")
+        commands = list(self.last_remediation_commands)
+        display_cmd = "\n".join(commands)
+        confirm = self._ask_yes_no(
+            "Apply Fix",
+            f"Execute the following system remediation command(s)?\n\n{display_cmd}"
+        )
         if confirm:
             def worker():
                 try:
-                    subprocess.run(cmd, shell=True, check=True)
+                    import shlex
+                    for single_cmd in commands:
+                        parsed_args = shlex.split(single_cmd)
+                        if parsed_args:
+                            subprocess.run(parsed_args, shell=False, check=True)
                     self.root.after(0, lambda: self._show_info("Fix Applied", "Successfully applied remediation!"))
                 except Exception as e:
                     self.root.after(0, lambda: self._show_error("Fix Error", f"Remediation command failed: {e}"))

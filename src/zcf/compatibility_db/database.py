@@ -121,7 +121,7 @@ class CompatibilityDatabase:
                 entry_id="zcf_entry_qemu_busybox_arm64",
                 application_name="Busybox Static",
                 version="1.36.1",
-                target_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                target_sha256="4be20eaf6c9a5d0231630b1baa5459ea6ab96284dd3b97f9d925491dcf4cd830",
                 target_format="elf",
                 target_architecture="arm64",
                 status=CompatibilityStatus.VERIFIED_COMPATIBLE,
@@ -166,9 +166,18 @@ class CompatibilityDatabase:
             if not self.get_by_id(entry.entry_id):
                 self.add_entry(entry)
 
+    def _resolve_entry_path(self, entry_id: str) -> str:
+        if not entry_id or not re.match(r"^[a-zA-Z0-9_\-]+$", entry_id):
+            raise DatabaseError(f"Invalid entry_id: '{entry_id}' contains invalid characters or path traversal elements.")
+        abs_storage = os.path.abspath(self.storage_dir)
+        target_path = os.path.abspath(os.path.join(abs_storage, f"{entry_id}.json"))
+        if not target_path.startswith(abs_storage):
+            raise DatabaseError(f"Path traversal detected in entry_id '{entry_id}'")
+        return target_path
+
     def add_entry(self, entry: CompatibilityEntry) -> str:
         self._validate_entry(entry)
-        file_path = os.path.join(self.storage_dir, f"{entry.entry_id}.json")
+        file_path = self._resolve_entry_path(entry.entry_id)
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(entry.to_dict(), f, indent=2)
@@ -183,7 +192,10 @@ class CompatibilityDatabase:
         return None
 
     def get_by_id(self, entry_id: str) -> Optional[CompatibilityEntry]:
-        file_path = os.path.join(self.storage_dir, f"{entry_id}.json")
+        try:
+            file_path = self._resolve_entry_path(entry_id)
+        except DatabaseError:
+            return None
         if os.path.exists(file_path):
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
@@ -336,6 +348,11 @@ class CompatibilityDatabase:
     def _validate_entry(self, entry: CompatibilityEntry):
         if not entry.entry_id:
             raise DatabaseError("Missing entry_id")
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", entry.entry_id):
+            raise DatabaseError(
+                f"Invalid entry_id '{entry.entry_id}': contains illegal characters or path traversal elements. "
+                "Only alphanumeric characters, underscores, and hyphens are permitted."
+            )
         if not entry.target_sha256 or len(entry.target_sha256) != 64:
             raise DatabaseError("Invalid or missing target_sha256 (must be 64-char hex)")
         if not re.match(r"^[0-9a-fA-F]{64}$", entry.target_sha256):
@@ -348,11 +365,11 @@ class CompatibilityDatabase:
         raw_status = data.get("status", "untested")
         status = CompatibilityStatus(raw_status) if raw_status in [s.value for s in CompatibilityStatus] else CompatibilityStatus.UNTESTED
 
-        raw_tier = data.get("provenance_tier", ProvenanceTier.MAINTAINER_VERIFIED.value)
-        tier = ProvenanceTier(raw_tier) if raw_tier in [p.value for p in ProvenanceTier] else ProvenanceTier.MAINTAINER_VERIFIED
+        raw_tier = data.get("provenance_tier", ProvenanceTier.COMMUNITY_UNTESTED.value)
+        tier = ProvenanceTier(raw_tier) if raw_tier in [p.value for p in ProvenanceTier] else ProvenanceTier.COMMUNITY_UNTESTED
 
-        raw_ev = data.get("evidence_status", EvidenceStatus.VERIFIED.value)
-        evidence_status = EvidenceStatus(raw_ev) if raw_ev in [e.value for e in EvidenceStatus] else EvidenceStatus.VERIFIED
+        raw_ev = data.get("evidence_status", EvidenceStatus.COMMUNITY_REPORTED.value)
+        evidence_status = EvidenceStatus(raw_ev) if raw_ev in [e.value for e in EvidenceStatus] else EvidenceStatus.COMMUNITY_REPORTED
 
         return CompatibilityEntry(
             entry_id=data["entry_id"],
