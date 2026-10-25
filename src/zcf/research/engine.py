@@ -17,6 +17,8 @@ from zcf.core.models import (
     CompatibilityEntry,
     CompatibilityStatus,
     EnvironmentReport,
+    EvidenceStatus,
+    ProvenanceTier,
 )
 from zcf.diagnostics.analyzer import DiagnosticEngine, DiagnosticEvent
 from zcf.environment.inspector import EnvironmentInspector
@@ -143,6 +145,9 @@ class CompatibilityResearchEngine:
                 workarounds=verified_workarounds,
                 diagnostic_signatures=[e.signature for e in diag_events],
                 provenance={"authority": "rea-agent", "contributor": "ZCF Research Engine"},
+                provenance_tier=ProvenanceTier.AUTOMATED_TEST,
+                evidence_status=EvidenceStatus.REPRODUCED,
+                test_procedure=f"Automated empirical workaround synthesis for {app.file_name}",
             )
             self.db.add_entry(entry)
 

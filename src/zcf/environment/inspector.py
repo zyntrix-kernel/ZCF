@@ -42,6 +42,16 @@ class EnvironmentInspector:
         display = self._detect_display_server(os_type)
         runtimes = self._discover_runtimes(os_type)
 
+        bwrap_path = shutil.which("bwrap")
+        can_sandbox = os_type == "linux" and bwrap_path is not None
+
+        vulkan_avail = (
+            shutil.which("vulkaninfo") is not None
+            or shutil.which("vulkaninfo.exe") is not None
+            or os.path.exists("/usr/lib/libvulkan.so.1")
+            or os.path.exists("/usr/lib/x86_64-linux-gnu/libvulkan.so.1")
+        )
+
         return EnvironmentReport(
             os_name=os_type,
             architecture=canonical_arch,
@@ -54,12 +64,14 @@ class EnvironmentInspector:
             display_server=display,
             available_runtimes=runtimes,
             graphics_capabilities={
-                "vulkan_supported": shutil.which("vulkaninfo") is not None,
+                "vulkan_supported": vulkan_avail,
                 "opengl_version": None,
                 "hardware_acceleration": True,
             },
             isolation_features={
-                "can_sandbox": os_type == "linux",
+                "can_sandbox": can_sandbox,
+                "bwrap_installed": bwrap_path is not None,
+                "bwrap_path": bwrap_path,
                 "namespaces_available": os_type == "linux",
                 "root_privileges": os.geteuid() == 0 if hasattr(os, "geteuid") else False,
             },
@@ -87,6 +99,27 @@ class EnvironmentInspector:
                 pages = os.sysconf("SC_PHYS_PAGES")
                 page_size = os.sysconf("SC_PAGE_SIZE")
                 return (pages * page_size) // (1024 * 1024)
+            except Exception:
+                pass
+        if os.name == "nt":
+            try:
+                import ctypes
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                    return int(stat.ullTotalPhys // (1024 * 1024))
             except Exception:
                 pass
         return 8192

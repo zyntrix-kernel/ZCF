@@ -3,7 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: Cross-Distribution](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-green.svg)](#)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#)
-[![Tests: 112 Passed (100%)](https://img.shields.io/badge/Tests-112%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Tests: 127 Passed (100%)](https://img.shields.io/badge/Tests-127%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
 [![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](.github/workflows/ci.yml)
 [![Release: v0.2.0 Distro-Grade](https://img.shields.io/badge/Release-v0.2.0%20Distro--Grade-blue.svg)](#)
 [![REA: 6.7.0 Verified](https://img.shields.io/badge/REA-6.7.0%20Verified-purple.svg)](docs/REA_SETUP.md)
@@ -64,15 +64,31 @@ The Control Center provides:
 - **Storage & Prefix Cleaner:** Audit compatibility container disk usage and clean stale temporary prefixes with a single click.
 - **Automated Troubleshooter & REA:** Paste any error message to receive instant plain-language root-cause diagnosis and one-click remediation.
 
-### 3.2 Unified Terminal Dashboard (for Advanced Users)
+### 3.2 Local Web Console (Zero-Dependency Browser Interface)
+For headless servers, remote SSH sessions, or users who prefer a web interface:
+```bash
+zcf console     # or 'zcf web' or run standalone 'zcf-console'
+```
+Binds securely to `http://127.0.0.1:8765` (loopback only) with no third-party web frameworks, providing:
+- Live system telemetry & runtime health monitoring
+- Browser-based binary header inspector and constraint planner
+- Compatibility knowledge base search and filtering
+- Prefix storage manager with active process lock detection
+- Interactive failure log troubleshooter and auto-remediation synthesis
+- Full JSON REST API (`/api/env`, `/api/db`, `/api/prefixes`, `/api/inspect`, `/api/plan`, `/api/diag`)
+
+### 3.3 Unified Terminal Dashboard (for CLI Users)
 ```bash
 zcf dashboard
 ```
 
-### 3.3 Seamless Application Execution (with sandboxing & auto-display)
+### 3.4 Seamless Application Execution (with sandboxing & auto-display)
 ```bash
 # Execute application through optimal runtime with Bubblewrap sandboxing
 zcf run path/to/application.exe
+
+# Allow bridged host network access (defaults to isolated namespace)
+zcf run path/to/application.exe --allow-network
 
 # Force headless virtual display (Xvfb) for servers and CI
 zcf run path/to/application.exe --headless
@@ -81,45 +97,65 @@ zcf run path/to/application.exe --headless
 ./application.exe
 ```
 
-### 3.4 Integrate Application into Linux Desktop Menu
+### 3.5 Integrate Application into Linux Desktop Menu
 ```bash
+# Add application to application menu
 zcf integrate path/to/application.exe --name "My Windows App"
+
+# List all integrated applications
+zcf integrate --list
+
+# Remove an integrated application launcher
+zcf integrate --remove path/to/application.exe
 ```
 
-### 3.3 Host Environment Audit
+### 3.6 Host Environment Audit
 ```bash
 zcf env
 ```
 
-### 3.4 Inspect an Application
+### 3.7 Inspect an Application
 ```bash
 zcf inspect path/to/app.exe
 ```
 
-### 3.5 Generate Compatibility Plan
+### 3.8 Generate Compatibility Plan
 ```bash
 zcf plan path/to/app.exe
 ```
 
-### 3.6 Controlled Execution Test
+### 3.9 Controlled Execution Test & Evidence Recording
 ```bash
+# Perform dry-run plan simulation
 zcf test path/to/app.exe --dry-run
+
+# Execute live compatibility test and record outcome to local database
+zcf test path/to/app.exe --execute --record --contributor "My Name"
 ```
 
-### 3.7 Diagnose Runtime Failure Logs & Synthesize Fixes
+### 3.10 Diagnose Runtime Failure Logs & Synthesize Fixes
 ```bash
 zcf diag path/to/error.log --target path/to/app.exe
 ```
 
-### 3.8 End-to-End Research Investigation
+### 3.11 End-to-End Research Investigation
 ```bash
 zcf research path/to/app.exe path/to/error.log
 ```
 
-### 3.9 Query & Sync Compatibility Knowledge Base
+### 3.12 Query, Verify & Sync Compatibility Knowledge Base
 ```bash
-# List all verified compatibility entries
+# List all compatibility entries
 zcf db list
+
+# Submit community profile
+zcf db submit --app path/to/app.exe --status verified_compatible
+
+# Verify and promote profile with structured test evidence
+zcf db verify --id community_app_12345678 --verifier "Maintainer Name"
+
+# Delete a profile from storage
+zcf db delete --id test_profile_id
 
 # Export portable evidence bundle
 zcf db export --output bundle.json
@@ -128,7 +164,7 @@ zcf db export --output bundle.json
 zcf db import --file bundle.json
 ```
 
-### 3.10 View Documentation Manual Page
+### 3.13 View Documentation Manual Page
 ```bash
 man zcf
 ```
@@ -174,7 +210,7 @@ python -m unittest discover -s tests -v
 bash tests/run_tests.sh
 ```
 
-All **112 automated tests** across **21 test suites** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2 with xvfb). Synthetic fixtures are honestly distinguished from real application profiles, which default to unverified community status until independently reproduced.
+All **127 automated tests** across **23 test suites** pass 100% across both Windows 11 host and Ubuntu 26.04 (WSL2 with xvfb). Synthetic fixtures are honestly distinguished from real application profiles, which default to unverified community status until independently reproduced.
 
 ---
 

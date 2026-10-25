@@ -285,6 +285,20 @@ class ZCFControlCenter:
         )
         chk_headless.pack(anchor="w")
 
+        self.var_network = tk.BooleanVar(value=False)
+        chk_network = tk.Checkbutton(
+            opt_box,
+            text="Permit Bridged Host Network Access (Defaults to isolated)",
+            variable=self.var_network,
+            bg=DARK_THEME["card_bg"],
+            fg=DARK_THEME["fg"],
+            selectcolor=DARK_THEME["bg"],
+            activebackground=DARK_THEME["card_bg"],
+            activeforeground=DARK_THEME["fg"],
+            font=("Segoe UI", 9),
+        )
+        chk_network.pack(anchor="w")
+
         # Action Buttons
         btn_box = ttk.Frame(card, style="Card.TFrame")
         btn_box.pack(fill="x", pady=(15, 0))
@@ -357,6 +371,7 @@ class ZCFControlCenter:
 
         use_sandbox = self.var_sandbox.get()
         force_headless = self.var_headless.get()
+        allow_network = self.var_network.get()
 
         def run_worker():
             orchestrator = ExecutionOrchestrator()
@@ -365,6 +380,7 @@ class ZCFControlCenter:
                     artifact_path=path,
                     use_sandbox=use_sandbox,
                     force_headless=force_headless,
+                    allow_network=allow_network,
                     auto_install=True,
                 )
             except Exception as ex:

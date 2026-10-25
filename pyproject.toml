@@ -34,6 +34,7 @@ dependencies = []
 zcf = "zcf.cli.main:main"
 zcf-runner = "zcf.cli.runner_entry:main"
 zcf-gui = "zcf.gui.main:main"
+zcf-console = "zcf.web.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

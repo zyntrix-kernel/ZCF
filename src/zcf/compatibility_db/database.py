@@ -370,6 +370,20 @@ class CompatibilityDatabase:
         except Exception as e:
             raise DatabaseError(f"Failed to persist compatibility entry: {str(e)}")
 
+    def delete_entry(self, entry_id: str) -> bool:
+        """Deletes a compatibility entry from storage by ID."""
+        try:
+            file_path = self._resolve_entry_path(entry_id)
+        except DatabaseError:
+            return False
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                return True
+            except OSError as e:
+                raise DatabaseError(f"Failed to delete compatibility entry: {str(e)}")
+        return False
+
     def get_by_sha256(self, target_sha256: str) -> Optional[CompatibilityEntry]:
         for entry in self.list_all():
             if entry.target_sha256.lower() == target_sha256.lower():

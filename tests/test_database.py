@@ -288,6 +288,31 @@ class TestCompatibilityDatabase(unittest.TestCase):
                 },
             )
 
+    def test_delete_entry(self):
+        """Verifies deleting an existing entry removes it from storage safely."""
+        entry = CompatibilityEntry(
+            entry_id="to_delete_app",
+            application_name="App To Delete",
+            target_sha256="1234567890abcdef" * 4,
+            target_format="pe",
+            target_architecture="x86_64",
+            status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+            last_verified="2026-10-24T00:00:00Z",
+            recommended_runtime="runtime.wine",
+        )
+        self.db.add_entry(entry)
+        self.assertIsNotNone(self.db.get_by_id("to_delete_app"))
+
+        # Deleting existing entry returns True
+        self.assertTrue(self.db.delete_entry("to_delete_app"))
+        self.assertIsNone(self.db.get_by_id("to_delete_app"))
+
+        # Deleting non-existent entry returns False
+        self.assertFalse(self.db.delete_entry("non_existent_entry"))
+
+        # Traversal entry IDs are safely rejected
+        self.assertFalse(self.db.delete_entry("../escaping_id"))
+
 
 if __name__ == "__main__":
     unittest.main()

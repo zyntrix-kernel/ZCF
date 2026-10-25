@@ -3,7 +3,12 @@
 complete -c zcf -f
 
 complete -c zcf -n "__fish_use_subcommand" -a "dashboard" -d "Display system dashboard"
+complete -c zcf -n "__fish_use_subcommand" -a "console" -d "Launch local browser-based Web Console"
+complete -c zcf -n "__fish_use_subcommand" -a "web" -d "Launch local browser-based Web Console"
+complete -c zcf -n "__fish_use_subcommand" -a "gui" -d "Launch graphical Control Center"
 complete -c zcf -n "__fish_use_subcommand" -a "run" -d "Execute application with optimal runtime and sandboxing"
+complete -c zcf -n "__fish_use_subcommand" -a "integrate" -d "Manage desktop menu shortcuts"
+complete -c zcf -n "__fish_use_subcommand" -a "service" -d "Manage background maintenance and binfmt"
 complete -c zcf -n "__fish_use_subcommand" -a "inspect" -d "Inspect application binary"
 complete -c zcf -n "__fish_use_subcommand" -a "env" -d "Inspect host environment"
 complete -c zcf -n "__fish_use_subcommand" -a "plan" -d "Generate compatibility plan"

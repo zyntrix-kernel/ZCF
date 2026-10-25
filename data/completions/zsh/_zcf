@@ -4,7 +4,11 @@ _zcf() {
     local -a commands
     commands=(
         'dashboard:Display the interactive system dashboard'
+        'console:Launch local browser-based Web Console'
+        'web:Launch local browser-based Web Console'
+        'gui:Launch graphical Control Center'
         'run:Execute an application through optimal runtime with sandboxing'
+        'integrate:Manage Linux desktop application menu shortcuts'
         'inspect:Inspect an application binary or script'
         'env:Inspect host environment and runtimes'
         'plan:Generate deterministic compatibility plan'

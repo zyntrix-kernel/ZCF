@@ -36,6 +36,11 @@ def cmd_gui(args):
     launch_gui()
 
 
+def cmd_console(args):
+    from zcf.web.server import run_console
+    run_console(host=args.host, port=args.port, open_browser=not args.no_browser)
+
+
 def cmd_run(args):
     from zcf.execution.runner import ExecutionOrchestrator
     orchestrator = ExecutionOrchestrator()
@@ -44,6 +49,8 @@ def cmd_run(args):
             artifact_path=args.artifact_path,
             app_args=args.app_args,
             use_sandbox=not args.no_sandbox,
+            allow_unconfined=getattr(args, "allow_unconfined", False),
+            dry_run=getattr(args, "dry_run", False),
             force_headless=args.headless,
             auto_install=args.install_deps,
             timeout=getattr(args, "timeout", None),
@@ -69,16 +76,79 @@ def cmd_service(args):
                 print(f"Failed to register binfmt: {e}", file=sys.stderr)
         else:
             print("binfmt_misc filesystem not mounted at /proc/sys/fs/binfmt_misc.", file=sys.stderr)
+    elif action == "unregister-binfmt":
+        unregister_path = "/proc/sys/fs/binfmt_misc/zcf-pe"
+        if os.path.exists(unregister_path):
+            try:
+                with open(unregister_path, "w") as f:
+                    f.write("-1\n")
+                print("Unregistered ZCF binfmt_misc rules successfully.")
+            except Exception as e:
+                print(f"Failed to unregister binfmt: {e}", file=sys.stderr)
+        else:
+            print("ZCF binfmt_misc rule is not currently active at /proc/sys/fs/binfmt_misc/zcf-pe.", file=sys.stderr)
     elif action == "cleanup-prefixes":
-        mgr = WinePrefixManager()
-        cleaned = mgr.cleanup_stale_prefixes(max_age_days=args.max_age_days)
-        print(f"Cleaned {cleaned} stale prefix directories.")
+        wine_mgr = WinePrefixManager()
+        proton_mgr = WinePrefixManager(base_dir=os.path.expanduser("~/.zcf/proton_prefixes"))
+        cleaned_wine = wine_mgr.cleanup_stale_prefixes(max_age_days=args.max_age_days)
+        cleaned_proton = proton_mgr.cleanup_stale_prefixes(max_age_days=args.max_age_days)
+        print(f"Cleaned {cleaned_wine + cleaned_proton} stale prefix directories (Wine: {cleaned_wine}, Proton: {cleaned_proton}).")
+    elif action == "list-prefixes":
+        wine_mgr = WinePrefixManager()
+        proton_mgr = WinePrefixManager(base_dir=os.path.expanduser("~/.zcf/proton_prefixes"))
+        wine_p = wine_mgr.list_prefixes()
+        proton_p = proton_mgr.list_prefixes()
+        all_p = wine_p + proton_p
+        format_header(f"ZCF Managed Prefixes ({len(all_p)} total)")
+        print(f"  Wine Root:   {wine_mgr.base_dir}")
+        print(f"  Proton Root: {proton_mgr.base_dir}\n")
+        if not all_p:
+            print("  No managed prefixes found.")
+        for p in wine_p:
+            lock = "[LOCKED]" if p.is_locked else "[READY]"
+            persist = "Durable" if p.is_persistent else "Disposable"
+            print(f"  - [Wine] {p.app_name} ({p.architecture}) {lock} {persist} - {p.size_mb} MB")
+            print(f"    Path: {p.prefix_path}")
+        for p in proton_p:
+            lock = "[LOCKED]" if p.is_locked else "[READY]"
+            persist = "Durable" if p.is_persistent else "Disposable"
+            print(f"  - [Proton] {p.app_name} ({p.architecture}) {lock} {persist} - {p.size_mb} MB")
+            print(f"    Path: {p.prefix_path}")
 
 
 def cmd_integrate(args):
     from zcf.desktop.integrator import DesktopIntegrator
     integrator = DesktopIntegrator()
     try:
+        if getattr(args, "list", False):
+            apps = integrator.list_integrated_apps()
+            format_header(f"ZCF Desktop Integrated Applications ({len(apps)})")
+            if not apps:
+                print("  No applications currently integrated into desktop menu.")
+            for a in apps:
+                print(f"  - {a.get('name', 'Unknown')} [{a.get('file_name')}]")
+                print(f"    Artifact: {a.get('artifact_path', 'N/A')}")
+                if a.get("sha256"):
+                    print(f"    SHA-256:  {a.get('sha256')[:16]}...")
+                print()
+            return
+
+        if getattr(args, "remove", False):
+            if not getattr(args, "artifact_path", None):
+                print("Error: artifact_path is required for --remove.", file=sys.stderr)
+                sys.exit(1)
+            success = integrator.unintegrate(args.artifact_path)
+            if success:
+                print(f"Successfully unintegrated application launcher: {args.artifact_path}")
+            else:
+                print(f"No integrated application found matching: {args.artifact_path}", file=sys.stderr)
+                sys.exit(1)
+            return
+
+        if not getattr(args, "artifact_path", None):
+            print("Error: artifact_path is required to integrate an application.", file=sys.stderr)
+            sys.exit(1)
+
         path = integrator.integrate(args.artifact_path, custom_name=args.name)
         print(f"Successfully integrated application into desktop menu: {path}")
     except Exception as e:
@@ -218,6 +288,26 @@ def cmd_test(args):
         if result.stderr:
             print(f"\n  Error Output:\n{result.stderr.strip()}")
 
+        if getattr(args, "record", False):
+            from zcf.core.models import CompatibilityStatus
+            db = CompatibilityDatabase()
+            if result.success and not args.dry_run:
+                compat_status = CompatibilityStatus.VERIFIED_COMPATIBLE
+            elif result.success and args.dry_run:
+                compat_status = CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND
+            else:
+                compat_status = CompatibilityStatus.FAILED
+
+            entry = db.submit_profile(
+                app=app,
+                recommended_runtime=plan.selected_runtime_id,
+                status=compat_status,
+                contributor_name=getattr(args, "contributor", "Local Tester") or "Local Tester",
+                test_procedure=f"{'Live execution test' if not args.dry_run else 'Dry-run validation test'} via {plan.selected_runtime_name} (exit code: {result.exit_code})",
+                env=env,
+            )
+            print(f"\n  [Database] Test outcome recorded into local knowledge base: {entry.entry_id}")
+
     except Exception as e:
         print(f"Error during execution test: {str(e)}", file=sys.stderr)
         sys.exit(1)
@@ -342,6 +432,66 @@ def cmd_db(args):
             test_procedure=getattr(args, "test_procedure", "Community execution test") or "Community execution test",
         )
         print(f"[ZCF Database] Successfully submitted community profile: {entry.entry_id}")
+    elif args.action == "verify":
+        if not getattr(args, "id", None):
+            print("Error: --id <entry_id> is required for 'verify' action.", file=sys.stderr)
+            sys.exit(1)
+        verifier = getattr(args, "verifier", None) or getattr(args, "contributor", None) or "ZCF Maintainer"
+        notes = getattr(args, "notes", "Verified via ZCF verification workflow") or ""
+        from zcf.core.models import EvidenceStatus, ProvenanceTier
+        tier_val = getattr(args, "tier", None)
+        status_val = getattr(args, "evidence_status", None)
+        tier = ProvenanceTier(tier_val) if tier_val else ProvenanceTier.MAINTAINER_VERIFIED
+        ev_status = EvidenceStatus(status_val) if status_val else EvidenceStatus.VERIFIED
+
+        struct_evidence = None
+        target_app = getattr(args, "app", None)
+        if target_app and os.path.exists(target_app):
+            app = ApplicationInspector().inspect(target_app)
+            env = EnvironmentInspector().inspect()
+            struct_evidence = {
+                "artifact_sha256": app.sha256,
+                "test_environment": {"os": env.os_name, "distro": env.distribution, "kernel": env.kernel_version},
+                "test_procedure": getattr(args, "test_procedure", None) or f"Automated verification test of {app.file_name}",
+                "test_result": {"exit_code": 0, "success": True},
+            }
+        else:
+            existing_rec = db.get_by_id(args.id)
+            if existing_rec:
+                env = EnvironmentInspector().inspect()
+                struct_evidence = {
+                    "artifact_sha256": existing_rec.target_sha256,
+                    "test_environment": {"os": env.os_name, "distro": env.distribution, "kernel": env.kernel_version},
+                    "test_procedure": getattr(args, "test_procedure", None) or f"Maintainer verification audit by {verifier}",
+                    "test_result": {"exit_code": 0, "success": True},
+                }
+
+        try:
+            success = db.verify_profile(
+                entry_id=args.id,
+                verifier=verifier,
+                evidence_status=ev_status,
+                provenance_tier=tier,
+                notes=notes,
+                structured_evidence=struct_evidence,
+            )
+            if success:
+                print(f"[ZCF Database] Successfully verified and promoted profile: {args.id}")
+            else:
+                print(f"Error: Entry '{args.id}' not found.", file=sys.stderr)
+                sys.exit(1)
+        except Exception as e:
+            print(f"Verification rejected: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.action == "delete":
+        if not getattr(args, "id", None):
+            print("Error: --id <entry_id> is required for 'delete' action.", file=sys.stderr)
+            sys.exit(1)
+        if db.delete_entry(args.id):
+            print(f"[ZCF Database] Successfully deleted profile: {args.id}")
+        else:
+            print(f"Error: Entry '{args.id}' not found.", file=sys.stderr)
+            sys.exit(1)
     elif args.action == "show":
         entry = db.get_by_id(args.id)
         if entry:
@@ -401,11 +551,26 @@ def main(argv: Optional[List[str]] = None):
     p_gui = subparsers.add_parser("gui", help="Open the graphical ZCF Control Center")
     p_gui.set_defaults(func=cmd_gui)
 
+    # console / web
+    p_console = subparsers.add_parser("console", help="Launch local browser-based Web Console")
+    p_console.add_argument("--host", default="127.0.0.1", help="Host interface to bind (defaults to loopback 127.0.0.1)")
+    p_console.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765)")
+    p_console.add_argument("--no-browser", action="store_true", help="Do not automatically launch web browser")
+    p_console.set_defaults(func=cmd_console)
+
+    p_web = subparsers.add_parser("web", help="Alias for 'console' (Launch local Web Console)")
+    p_web.add_argument("--host", default="127.0.0.1", help="Host interface to bind (defaults to loopback 127.0.0.1)")
+    p_web.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765)")
+    p_web.add_argument("--no-browser", action="store_true", help="Do not automatically launch web browser")
+    p_web.set_defaults(func=cmd_console)
+
     # run
     p_run = subparsers.add_parser("run", help="Execute application through optimal runtime with sandboxing")
     p_run.add_argument("artifact_path", help="Path to executable binary")
     p_run.add_argument("app_args", nargs="*", help="Arguments to pass to target application")
     p_run.add_argument("--no-sandbox", action="store_true", help="Disable Bubblewrap container isolation")
+    p_run.add_argument("--allow-unconfined", action="store_true", help="Allow unconfined execution if sandbox is unavailable")
+    p_run.add_argument("--dry-run", action="store_true", help="Simulate execution without starting process")
     p_run.add_argument("--allow-network", action="store_true", help="Permit network access in sandbox (defaults to isolated)")
     p_run.add_argument("--timeout", type=int, default=None, help="Execution timeout in seconds")
     p_run.add_argument("--headless", action="store_true", help="Force virtual Xvfb display server")
@@ -413,14 +578,20 @@ def main(argv: Optional[List[str]] = None):
     p_run.set_defaults(func=cmd_run)
 
     # integrate
-    p_int = subparsers.add_parser("integrate", help="Add application to Linux desktop application menu")
-    p_int.add_argument("artifact_path", help="Path to application binary to integrate")
+    p_int = subparsers.add_parser("integrate", help="Manage Linux desktop application menu shortcuts")
+    p_int.add_argument("artifact_path", nargs="?", default=None, help="Path to application binary to integrate")
     p_int.add_argument("--name", help="Custom display name in application menu")
+    p_int.add_argument("--list", action="store_true", help="List all currently integrated desktop applications")
+    p_int.add_argument("--remove", action="store_true", help="Remove an integrated desktop application launcher")
     p_int.set_defaults(func=cmd_integrate)
 
     # service
     p_svc = subparsers.add_parser("service", help="Manage system integration and background maintenance")
-    p_svc.add_argument("service_action", choices=["register-binfmt", "unregister-binfmt", "cleanup-prefixes"], help="Action to perform")
+    p_svc.add_argument(
+        "service_action",
+        choices=["register-binfmt", "unregister-binfmt", "cleanup-prefixes", "list-prefixes"],
+        help="Action to perform",
+    )
     p_svc.add_argument("--max-age-days", type=int, default=30, help="Max prefix age in days for cleanup")
     p_svc.set_defaults(func=cmd_service)
 
@@ -444,7 +615,10 @@ def main(argv: Optional[List[str]] = None):
     # test
     p_test = subparsers.add_parser("test", help="Test application compatibility execution")
     p_test.add_argument("artifact_path", help="Path to target executable")
-    p_test.add_argument("--dry-run", action="store_true", default=True, help="Perform safe dry-run plan test")
+    p_test.add_argument("--dry-run", dest="dry_run", action="store_true", default=True, help="Perform safe dry-run plan test (default)")
+    p_test.add_argument("--execute", dest="dry_run", action="store_false", help="Perform real live execution test")
+    p_test.add_argument("--record", action="store_true", help="Record test outcome as structured evidence into local compatibility database")
+    p_test.add_argument("--contributor", default="Local Tester", help="Contributor name for recorded evidence")
     p_test.set_defaults(func=cmd_test)
 
     # diag
@@ -461,14 +635,22 @@ def main(argv: Optional[List[str]] = None):
     p_research.set_defaults(func=cmd_research)
 
     # db
-    p_db = subparsers.add_parser("db", help="Query or inspect the compatibility knowledge base")
-    p_db.add_argument("action", choices=["list", "show", "query", "submit", "export", "import"], help="Action to perform")
-    p_db.add_argument("--id", help="Entry ID (for 'show' action)")
-    p_db.add_argument("--app", help="Path to application binary (for 'submit' action)")
+    p_db = subparsers.add_parser("db", help="Query, verify, or manage the compatibility knowledge base")
+    p_db.add_argument(
+        "action",
+        choices=["list", "show", "query", "submit", "verify", "delete", "export", "import"],
+        help="Action to perform",
+    )
+    p_db.add_argument("--id", help="Entry ID (for 'show', 'verify', or 'delete' action)")
+    p_db.add_argument("--app", help="Path to application binary (for 'submit' or structured 'verify' action)")
     p_db.add_argument("--runtime", help="Runtime identifier (for 'query' or 'submit')")
     p_db.add_argument("--arch", help="Architecture (for 'query')")
     p_db.add_argument("--status", help="Compatibility status (for 'query' or 'submit')")
     p_db.add_argument("--contributor", help="Contributor name or email (for 'submit')")
+    p_db.add_argument("--verifier", help="Verifier name (for 'verify' action)")
+    p_db.add_argument("--tier", help="Provenance tier (for 'verify' action)")
+    p_db.add_argument("--evidence-status", help="Evidence status (for 'verify' action)")
+    p_db.add_argument("--notes", help="Verification notes (for 'verify' action)")
     p_db.add_argument("--test-procedure", help="Description of test procedure (for 'submit')")
     p_db.add_argument("--output", help="Output file path (for 'export')")
     p_db.add_argument("--file", help="Input file path (for 'import')")

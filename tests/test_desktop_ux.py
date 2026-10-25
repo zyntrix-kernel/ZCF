@@ -84,6 +84,25 @@ class TestDesktopUX(unittest.TestCase):
             with self.assertRaises(ValueError):
                 integrator.integrate("/tmp/test\napp.exe")
 
+    def test_desktop_unintegrate_and_list(self):
+        """Verifies reversible desktop menu integration: list and unintegrate."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            integrator = DesktopIntegrator(applications_dir=temp_dir)
+            test_pe = os.path.abspath("fixtures/synthetic/valid_pe32plus.exe")
+            desktop_file = integrator.integrate(test_pe, custom_name="Reversible App")
+            self.assertTrue(os.path.isfile(desktop_file))
+
+            # List integrated apps
+            apps = integrator.list_integrated_apps()
+            self.assertEqual(len(apps), 1)
+            self.assertEqual(apps[0]["name"], "Reversible App")
+
+            # Unintegrate
+            removed = integrator.unintegrate(test_pe)
+            self.assertTrue(removed)
+            self.assertFalse(os.path.exists(desktop_file))
+            self.assertEqual(len(integrator.list_integrated_apps()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

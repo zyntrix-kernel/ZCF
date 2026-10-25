@@ -18,8 +18,20 @@ and diagnoses runtime failures with automated remediation recommendations.
 .B dashboard
 Displays the interactive terminal dashboard showing system architecture, detected runtimes, and database status.
 .TP
+.B console \fR[\fB\-\-port\fR \fIPORT\fR] [\fB\-\-host\fR \fIHOST\fR]
+Launches the secure loopback browser-based Web Console and REST API. (Alias: \fBweb\fR).
+.TP
+.B gui
+Launches the standalone graphical Control Center for desktop application and prefix management.
+.TP
 .B run \fIPATH\fR [\fIARGS\fR...]
 Executes an application through its optimal planned runtime, ensuring prefix isolation, sandboxing, and automated crash diagnostics.
+.TP
+.B integrate \fIPATH\fR [\fB\-\-name\fR \fINAME\fR] [\fB\-\-list\fR] [\fB\-\-remove\fR]
+Manages Freedesktop application menu launchers with proper Exec escaping and reversible unintegration.
+.TP
+.B service \fIaction\fR
+Manages system integration and background maintenance (\fBregister\-binfmt\fR, \fBunregister\-binfmt\fR, \fBcleanup\-prefixes\fR, \fBlist\-prefixes\fR).
 .TP
 .B inspect \fIPATH\fR [\fB\-\-json\fR]
 Performs non-executing static analysis of a binary or script, extracting architecture, subsystem, imports, and Authenticode signatures.
@@ -30,17 +42,17 @@ Audits the host environment and detects installed compatibility runtimes.
 .B plan \fIPATH\fR [\fB\-\-json\fR]
 Generates a deterministic compatibility plan with explainable confidence scoring.
 .TP
-.B test \fIPATH\fR [\fB\-\-dry-run\fR]
-Validates execution capability in an isolated test harness without affecting host files.
+.B test \fIPATH\fR [\fB\-\-dry-run\fR] [\fB\-\-execute\fR] [\fB\-\-record\fR]
+Validates execution capability in an isolated test harness and optionally records evidence to the database.
 .TP
 .B diag \fILOG_PATH\fR [\fB\-\-target\fR \fIPATH\fR] [\fB\-\-json\fR]
-Analyzes execution failure logs against 14 known failure signatures and synthesizes distribution-tailored fix commands.
+Analyzes execution failure logs against known failure signatures and synthesizes distribution-tailored fix commands.
 .TP
 .B research \fIBINARY_PATH\fR \fILOG_PATH\fR
 Executes the 11-step empirical reverse-engineering and hypothesis verification workflow.
 .TP
 .B db \fIaction\fR [\fIOPTIONS\fR]
-Manages the compatibility knowledge base. Actions include \fBlist\fR, \fBshow\fR, \fBexport\fR, and \fBimport\fR.
+Manages the compatibility knowledge base. Actions include \fBlist\fR, \fBshow\fR, \fBquery\fR, \fBsubmit\fR, \fBverify\fR, \fBdelete\fR, \fBexport\fR, and \fBimport\fR.
 .SH ENVIRONMENT VARIABLES
 .TP
 .B ZCF_PREFIX_DIR

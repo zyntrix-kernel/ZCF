@@ -4,8 +4,8 @@ _zcf_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="dashboard run inspect env plan test diag research db service"
-    local db_actions="list show export import"
+    local commands="dashboard console web gui run inspect env plan test diag research db service integrate"
+    local db_actions="list show query submit verify delete export import"
 
     if [[ $cword -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$commands" -- "$cur") )

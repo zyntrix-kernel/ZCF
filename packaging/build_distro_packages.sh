@@ -59,6 +59,15 @@ if __name__ == "__main__":
 EOF
 chmod 755 "$BUILD_DIR/usr/bin/zcf-gui"
 
+cat << 'EOF' > "$BUILD_DIR/usr/bin/zcf-console"
+#!/usr/bin/env python3
+import sys
+from zcf.web.server import main
+if __name__ == "__main__":
+    main()
+EOF
+chmod 755 "$BUILD_DIR/usr/bin/zcf-console"
+
 echo "[3/6] Installing binfmt_misc & Systemd Units..."
 cp "$ROOT_DIR/data/binfmt.d/zcf.conf" "$BUILD_DIR/usr/lib/binfmt.d/"
 cp "$ROOT_DIR/data/systemd/zcf-binfmt.service" "$BUILD_DIR/usr/lib/systemd/system/"
