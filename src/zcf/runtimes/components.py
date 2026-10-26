@@ -72,6 +72,41 @@ class WindowsComponentManager:
             winetricks_verb="dxvk",
             verification_files=["dxgi.dll", "d3d11.dll"],
         ),
+        "vkd3d": ComponentDefinition(
+            key="vkd3d",
+            name="Vulkan VKD3D Direct3D 12 Translation",
+            description="Translates DirectX 12 graphics API calls to native Vulkan for modern AAA titles.",
+            winetricks_verb="vkd3d",
+            verification_files=["d3d12.dll"],
+        ),
+        "corefonts": ComponentDefinition(
+            key="corefonts",
+            name="Microsoft TrueType Core Fonts",
+            description="Essential Windows typography (Arial, Times New Roman, Courier) required for GUI text rendering.",
+            winetricks_verb="corefonts",
+            verification_files=["arial.ttf"],
+        ),
+        "dotnet48": ComponentDefinition(
+            key="dotnet48",
+            name="Microsoft .NET Framework 4.8",
+            description="Full Microsoft .NET Framework runtime for enterprise and modern Windows applications.",
+            winetricks_verb="dotnet48",
+            verification_files=["mscoree.dll"],
+        ),
+        "d3dcompiler_47": ComponentDefinition(
+            key="d3dcompiler_47",
+            name="Direct3D HLSL Shader Compiler (v47)",
+            description="HLSL shader bytecode assembler and translator required for modern Unreal Engine and Unity games.",
+            winetricks_verb="d3dcompiler_47",
+            verification_files=["d3dcompiler_47.dll"],
+        ),
+        "vcrun2010": ComponentDefinition(
+            key="vcrun2010",
+            name="Microsoft Visual C++ 2010 SP1 Runtime",
+            description="Legacy Visual C++ standard runtime libraries for DirectX 9/10 era software.",
+            winetricks_verb="vcrun2010",
+            verification_files=["msvcr100.dll", "msvcp100.dll"],
+        ),
     }
 
     def __init__(self):
@@ -86,7 +121,7 @@ class WindowsComponentManager:
     def is_installed_in_prefix(self, prefix_path: str, component_key: str) -> bool:
         """
         Verifies if all required component signature files exist inside the target prefix.
-        Requires all verification files to exist in system32 or syswow64.
+        Requires all verification files to exist in system32, syswow64, Fonts, or .NET framework directories.
         Never relies on prefix metadata as proof of current disk presence.
         """
         comp = self.get_component(component_key)
@@ -98,13 +133,219 @@ class WindowsComponentManager:
 
         system32 = os.path.join(prefix_path, "drive_c", "windows", "system32")
         syswow64 = os.path.join(prefix_path, "drive_c", "windows", "syswow64")
+        fonts_dir = os.path.join(prefix_path, "drive_c", "windows", "Fonts")
+        dotnet_dirs = [
+            os.path.join(prefix_path, "drive_c", "windows", "Microsoft.NET", "Framework", "v4.0.30319"),
+            os.path.join(prefix_path, "drive_c", "windows", "Microsoft.NET", "Framework64", "v4.0.30319"),
+        ]
 
-        # Every single verification file must exist in at least one system directory
+        search_dirs = [system32, syswow64]
         for v_file in comp.verification_files:
-            p32 = os.path.join(system32, v_file)
-            p64 = os.path.join(syswow64, v_file)
-            if not (os.path.exists(p32) or os.path.exists(p64)):
+            v_lower = v_file.lower()
+            current_dirs = search_dirs.copy()
+            if v_lower.endswith(".ttf") or v_lower.endswith(".fon"):
+                current_dirs.append(fonts_dir)
+            if "mscor" in v_lower:
+                current_dirs.extend(dotnet_dirs)
+
+            found = False
+            for d in current_dirs:
+                if not os.path.isdir(d):
+                    continue
+                try:
+                    for entry in os.listdir(d):
+                        if entry.lower() == v_lower:
+                            found = True
+                            break
+                except Exception:
+                    pass
+                if found:
+                    break
+
+            if not found:
                 return False
+
+        return True
+
+    def get_dll_overrides(self, prefix_path: str) -> Dict[str, str]:
+        """
+        Retrieves active DLL overrides configured in user.reg or prefix_meta.json.
+        Returns a dictionary mapping dll names (without extension) to load modes (e.g. 'native,builtin', 'disabled').
+        """
+        overrides: Dict[str, str] = {}
+        if not os.path.exists(prefix_path):
+            return overrides
+
+        # 1. Check user.reg in prefix
+        user_reg = os.path.join(prefix_path, "user.reg")
+        if os.path.exists(user_reg):
+            try:
+                with open(user_reg, "r", encoding="utf-8", errors="replace") as f:
+                    in_section = False
+                    for line in f:
+                        line_str = line.strip()
+                        if line_str.startswith("[") and line_str.endswith("]"):
+                            # Wine section header may have timestamp suffix, e.g. [Software\Wine\DllOverrides] 169000000 0
+                            clean_hdr = line_str[1:-1].split()[0]
+                            in_section = clean_hdr.lower() in ("software\\wine\\dlloverrides", "software\\\\wine\\\\dlloverrides")
+                            continue
+                        if in_section:
+                            if not line_str or line_str.startswith("#") or line_str.startswith(";"):
+                                continue
+                            if "=" in line_str:
+                                k, v = line_str.split("=", 1)
+                                k = k.strip().strip('"')
+                                v = v.strip().strip('"')
+                                if not v:
+                                    v = "disabled"
+                                overrides[k.lower()] = v
+            except Exception:
+                pass
+
+        # 2. Merge with prefix_meta.json (meta overrides take precedence or fill gaps)
+        meta_file = os.path.join(prefix_path, "prefix_meta.json")
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                meta_overrides = meta.get("dll_overrides", {})
+                if isinstance(meta_overrides, dict):
+                    for k, v in meta_overrides.items():
+                        overrides[str(k).lower()] = str(v)
+            except Exception:
+                pass
+
+        return overrides
+
+    def set_dll_override(self, prefix_path: str, dll_name: str, mode: str) -> bool:
+        """
+        Configures a DLL override (native, builtin, native,builtin, builtin,native, disabled)
+        inside user.reg and records it in prefix_meta.json.
+        """
+        if not os.path.exists(prefix_path):
+            return False
+
+        clean_dll = dll_name.lower().removesuffix(".dll").strip()
+        if not clean_dll:
+            return False
+
+        valid_modes = {"native,builtin", "builtin,native", "native", "builtin", "disabled", ""}
+        clean_mode = mode.lower().strip()
+        if clean_mode not in valid_modes:
+            clean_mode = "native,builtin"
+
+        reg_val = '""' if clean_mode == "disabled" else f'"{clean_mode}"'
+
+        # 1. Update user.reg
+        user_reg = os.path.join(prefix_path, "user.reg")
+        if os.path.exists(user_reg):
+            try:
+                with open(user_reg, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+
+                new_lines: List[str] = []
+                in_section = False
+                section_found = False
+                key_updated = False
+
+                for line in lines:
+                    line_str = line.strip()
+                    if line_str.startswith("["):
+                        if in_section and not key_updated:
+                            # Append before leaving section
+                            new_lines.append(f'"{clean_dll}"={reg_val}\n')
+                            key_updated = True
+                        clean_hdr = line_str[1:-1].split()[0]
+                        in_section = clean_hdr.lower() in ("software\\wine\\dlloverrides", "software\\\\wine\\\\dlloverrides")
+                        if in_section:
+                            section_found = True
+                    elif in_section and "=" in line_str:
+                        k = line_str.split("=", 1)[0].strip().strip('"').lower()
+                        if k == clean_dll:
+                            new_lines.append(f'"{clean_dll}"={reg_val}\n')
+                            key_updated = True
+                            continue
+
+                    new_lines.append(line)
+
+                if section_found and in_section and not key_updated:
+                    new_lines.append(f'"{clean_dll}"={reg_val}\n')
+                    key_updated = True
+
+                if not section_found:
+                    new_lines.append("\n[Software\\\\Wine\\\\DllOverrides]\n")
+                    new_lines.append(f'"{clean_dll}"={reg_val}\n')
+
+                with open(user_reg, "w", encoding="utf-8") as f:
+                    f.writelines(new_lines)
+            except Exception:
+                pass
+
+        # 2. Update prefix_meta.json
+        meta_file = os.path.join(prefix_path, "prefix_meta.json")
+        try:
+            meta = {}
+            if os.path.exists(meta_file):
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            overrides = meta.get("dll_overrides", {})
+            overrides[clean_dll] = clean_mode
+            meta["dll_overrides"] = overrides
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+        except Exception:
+            pass
+
+        return True
+
+    def remove_dll_override(self, prefix_path: str, dll_name: str) -> bool:
+        """Removes a configured DLL override from user.reg and prefix_meta.json."""
+        if not os.path.exists(prefix_path):
+            return False
+
+        clean_dll = dll_name.lower().removesuffix(".dll").strip()
+        if not clean_dll:
+            return False
+
+        # 1. Remove from user.reg
+        user_reg = os.path.join(prefix_path, "user.reg")
+        if os.path.exists(user_reg):
+            try:
+                with open(user_reg, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+
+                new_lines: List[str] = []
+                in_section = False
+                for line in lines:
+                    line_str = line.strip()
+                    if line_str.startswith("["):
+                        clean_hdr = line_str[1:-1].split()[0]
+                        in_section = clean_hdr.lower() in ("software\\wine\\dlloverrides", "software\\\\wine\\\\dlloverrides")
+                    elif in_section and "=" in line_str:
+                        k = line_str.split("=", 1)[0].strip().strip('"').lower()
+                        if k == clean_dll:
+                            continue  # Delete line
+                    new_lines.append(line)
+
+                with open(user_reg, "w", encoding="utf-8") as f:
+                    f.writelines(new_lines)
+            except Exception:
+                pass
+
+        # 2. Remove from prefix_meta.json
+        meta_file = os.path.join(prefix_path, "prefix_meta.json")
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                overrides = meta.get("dll_overrides", {})
+                if clean_dll in overrides:
+                    del overrides[clean_dll]
+                    meta["dll_overrides"] = overrides
+                    with open(meta_file, "w", encoding="utf-8") as f:
+                        json.dump(meta, f, indent=2)
+            except Exception:
+                pass
 
         return True
 

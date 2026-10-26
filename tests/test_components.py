@@ -198,6 +198,42 @@ class TestWindowsComponents(unittest.TestCase):
         self.assertFalse(res.success)
         self.assertIn("Unknown component key", res.error or "")
 
+    def test_extended_components_present(self):
+        """Verifies expanded component catalog contains corefonts, dotnet48, vkd3d, etc."""
+        keys = [c.key for c in self.mgr.list_components()]
+        for expected in ("corefonts", "dotnet48", "d3dcompiler_47", "vcrun2010", "vkd3d"):
+            self.assertIn(expected, keys)
+
+    def test_font_component_detection(self):
+        """Verifies true type fonts are correctly detected in Fonts directory."""
+        prefix_path = os.path.join(self.temp_dir, "test_font_prefix")
+        fonts_dir = os.path.join(prefix_path, "drive_c", "windows", "Fonts")
+        os.makedirs(fonts_dir, exist_ok=True)
+
+        self.assertFalse(self.mgr.is_installed_in_prefix(prefix_path, "corefonts"))
+        with open(os.path.join(fonts_dir, "arial.ttf"), "w") as f:
+            f.write("font_bytes")
+        self.assertTrue(self.mgr.is_installed_in_prefix(prefix_path, "corefonts"))
+
+    def test_dll_overrides_lifecycle(self):
+        """Verifies configuring, reading, and removing DLL overrides in user.reg and prefix_meta.json."""
+        prefix_path = os.path.join(self.temp_dir, "test_overrides_prefix")
+        os.makedirs(prefix_path, exist_ok=True)
+
+        # Set overrides
+        self.assertTrue(self.mgr.set_dll_override(prefix_path, "d3d11", "native,builtin"))
+        self.assertTrue(self.mgr.set_dll_override(prefix_path, "dxgi", "disabled"))
+
+        overrides = self.mgr.get_dll_overrides(prefix_path)
+        self.assertEqual(overrides.get("d3d11"), "native,builtin")
+        self.assertEqual(overrides.get("dxgi"), "disabled")
+
+        # Verify removal
+        self.assertTrue(self.mgr.remove_dll_override(prefix_path, "d3d11"))
+        updated = self.mgr.get_dll_overrides(prefix_path)
+        self.assertNotIn("d3d11", updated)
+        self.assertEqual(updated.get("dxgi"), "disabled")
+
 
 if __name__ == "__main__":
     unittest.main()

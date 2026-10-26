@@ -411,6 +411,27 @@ class ZCFControlCenter:
         card = ttk.Frame(self.tab_runtimes, style="Card.TFrame", padding=15)
         card.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # System Readiness Index Banner
+        audit = self.env_inspector.get_readiness_audit()
+        readiness_frame = ttk.Frame(card, style="Card.TFrame", padding=8)
+        readiness_frame.pack(fill="x", pady=(0, 12))
+
+        lbl_score = ttk.Label(
+            readiness_frame,
+            text=f"Pre-Flight System Readiness: [ {audit['score']}% ]  •  GRADE: {audit['grade']}",
+            font=("Segoe UI", 11, "bold"),
+            foreground=DARK_THEME["primary"] if audit["score"] >= 70 else DARK_THEME["accent_amber"],
+        )
+        lbl_score.pack(side="left")
+
+        btn_doctor = ttk.Button(
+            readiness_frame,
+            text="🩺  System Doctor Audit",
+            style="Secondary.TButton",
+            command=self._show_doctor_dialog,
+        )
+        btn_doctor.pack(side="right")
+
         header = ttk.Label(card, text="Compatibility Engines & Health Status:", style="Title.TLabel")
         header.pack(anchor="w", pady=(0, 10))
 
@@ -421,6 +442,23 @@ class ZCFControlCenter:
         self.runtimes_container.pack(fill="both", expand=True)
 
         self._populate_runtimes_list()
+
+    def _show_doctor_dialog(self):
+        audit = self.env_inspector.get_readiness_audit()
+        summary_lines = [
+            f"ZCF SYSTEM READINESS AUDIT",
+            f"Readiness Score: {audit['score']}% ({audit['grade']})",
+            f"Summary: {audit['summary']}",
+            "-" * 50,
+        ]
+        for c in audit["checks"]:
+            summary_lines.append(f"[{c['status']}] {c['name']} ({c['score_points']}/{c['max_points']} pts)")
+            summary_lines.append(f"  {c['details']}")
+            if c.get("remediation"):
+                summary_lines.append(f"  -> Fix: {c['remediation']}")
+            summary_lines.append("")
+
+        self._show_info("ZCF System Doctor", "\n".join(summary_lines))
 
     def _populate_runtimes_list(self):
         for widget in self.runtimes_container.winfo_children():

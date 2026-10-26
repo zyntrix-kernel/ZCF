@@ -3,7 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Platform: Cross-Distribution](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-green.svg)](#)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#)
-[![Tests: 127 Passed (100%)](https://img.shields.io/badge/Tests-127%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
+[![Tests: 159 Passed (100%)](https://img.shields.io/badge/Tests-159%20Passed%20(100%25)-brightgreen.svg)](docs/TESTING.md)
 [![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](.github/workflows/ci.yml)
 [![Release: v0.2.0 Distro-Grade](https://img.shields.io/badge/Release-v0.2.0%20Distro--Grade-blue.svg)](#)
 [![REA: 6.7.0 Verified](https://img.shields.io/badge/REA-6.7.0%20Verified-purple.svg)](docs/REA_SETUP.md)
@@ -59,8 +59,8 @@ zcf gui         # or simply run 'zcf-gui' or click ZCF in your Linux Application
 The Control Center provides:
 - **Application Launcher:** Browse any `.exe`, `.msi`, `.apk` or binary, inspect recommended runtime with live confidence score, toggle sandboxing, and launch.
 - **One-Click Start Menu Integration:** Pin any Windows or foreign application into your Linux desktop launcher / application grid (`zcf integrate`).
-- **Engine Health & 1-Click Install:** View real-time status of Wine, Proton, QEMU, Box64, Waydroid, and Bubblewrap with 1-click graphical package installation.
-- **Windows Component Manager (Zero-Terminal Winetricks):** 1-click installation of Microsoft Visual C++ (2015-2022), DirectX End-User Runtimes (D3DX9/11), Wine Mono (.NET), and Vulkan DXVK.
+- **Engine Health & System Doctor:** View real-time status of Wine, Proton, QEMU, Box64, Waydroid, and Bubblewrap with pre-flight readiness audit gauge and 1-click graphical package installation.
+- **Windows Component Manager (Zero-Terminal Winetricks):** 1-click verified installation of Microsoft Visual C++ (2010/2015-2022), DirectX End-User Runtimes (D3DX9/11), VKD3D Direct3D 12, Wine Mono (.NET), Microsoft .NET Framework 4.8, TrueType Core Fonts, and Vulkan DXVK.
 - **Storage & Prefix Cleaner:** Audit compatibility container disk usage and clean stale temporary prefixes with a single click.
 - **Automated Troubleshooter & REA:** Paste any error message to receive instant plain-language root-cause diagnosis and one-click remediation.
 
@@ -70,12 +70,13 @@ For headless servers, remote SSH sessions, or users who prefer a web interface:
 zcf console     # or 'zcf web' or run standalone 'zcf-console'
 ```
 Binds securely to `http://127.0.0.1:8765` (loopback only) with no third-party web frameworks, providing:
-- Live system telemetry & runtime health monitoring
-- Browser-based binary header inspector and constraint planner
-- Compatibility knowledge base search and filtering
-- Prefix storage manager with active process lock detection
-- Interactive failure log troubleshooter and auto-remediation synthesis
-- Full JSON REST API (`/api/env`, `/api/db`, `/api/prefixes`, `/api/inspect`, `/api/plan`, `/api/diag`)
+- **Pre-Flight System Readiness Gauge & Matrix:** Circular SVG gauge evaluating 7 host hardware and kernel parameters with actionable remediation commands.
+- **Interactive Compatibility Pipeline Topology Diagram:** Live visual flow showing `[Target Executable]` ➔ `[Security Perimeter]` ➔ `[Translation Engine]` ➔ `[Host Kernel & Display]`, with interactive inspection drawers.
+- **Prefix Surgery & Component Manager:** Inspect and install Windows components, and edit/delete Wine DLL overrides (`WINEDLLOVERRIDES`) directly per prefix.
+- **Live Execution Test Runner & Log Streamer:** Real-time log streamer with filter pills (`All Output`, `Errors Only`, `Warnings`, `Wine/Proton Channels`).
+- **Execution Run History & Side-by-Side Comparison:** Persistent run records with differential comparison of exit codes, runtime, duration, and output.
+- **Visual Diagnostic Severity Breakdown & Timeline:** Interactive event sequence and root-cause analysis in the Crash Troubleshooter.
+- **Full JSON REST API:** Comprehensive REST interface (`/api/env`, `/api/readiness`, `/api/components`, `/api/prefixes/overrides`, `/api/db`, `/api/prefixes`, `/api/inspect`, `/api/plan`, `/api/history`, `/api/diag`).
 
 ### 3.3 Unified Terminal Dashboard (for CLI Users)
 ```bash
@@ -114,17 +115,26 @@ zcf integrate --remove path/to/application.exe
 zcf env
 ```
 
-### 3.7 Inspect an Application
+### 3.7 Pre-Flight System Readiness Audit (`zcf doctor`)
+Audits 7 critical hardware, kernel, and subsystem parameters (Vulkan 1.3 32/64-bit loaders, Esync/Fsync file descriptor limits and futex2 fast mutexes, 32-bit i386 multiarch support, Bubblewrap unprivileged namespaces, DRI GPU render nodes, transparent binfmt_misc kernel registration, and ephemeral headless Xvfb virtual displays) and computes an explainable Readiness Score (0-100%) and Grade (`OPTIMAL`, `GOOD`, `DEGRADED`, `MINIMAL`):
+```bash
+zcf doctor
+
+# Output structured JSON for automated provisioning pipelines
+zcf doctor --json
+```
+
+### 3.8 Inspect an Application
 ```bash
 zcf inspect path/to/app.exe
 ```
 
-### 3.8 Generate Compatibility Plan
+### 3.9 Generate Compatibility Plan
 ```bash
 zcf plan path/to/app.exe
 ```
 
-### 3.9 Controlled Execution Test & Evidence Recording
+### 3.10 Controlled Execution Test & Evidence Recording
 ```bash
 # Perform dry-run plan simulation
 zcf test path/to/app.exe --dry-run
@@ -133,7 +143,7 @@ zcf test path/to/app.exe --dry-run
 zcf test path/to/app.exe --execute --record --contributor "My Name"
 ```
 
-### 3.10 Execution Test History & Side-by-Side Comparison
+### 3.11 Execution Test History & Side-by-Side Comparison
 ```bash
 # List recent execution and test runs
 zcf history

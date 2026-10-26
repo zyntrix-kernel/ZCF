@@ -11,6 +11,7 @@ _zcf() {
         'integrate:Manage Linux desktop application menu shortcuts'
         'inspect:Inspect an application binary or script'
         'env:Inspect host environment and runtimes'
+        'doctor:Run pre-flight system readiness audit and gaming optimization check'
         'plan:Generate deterministic compatibility plan'
         'test:Test application compatibility execution'
         'diag:Analyze runtime failure log and synthesize fixes'
@@ -51,7 +52,7 @@ _zcf() {
                         '--install-deps[Automatically install missing package dependencies]' \
                         '*:application binary:_files'
                     ;;
-                inspect|plan)
+                inspect|plan|doctor|env)
                     _arguments \
                         '--json[Output JSON]' \
                         '*:target file:_files'

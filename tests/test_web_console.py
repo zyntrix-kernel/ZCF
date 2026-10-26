@@ -345,6 +345,68 @@ class TestWebConsole(unittest.TestCase):
         self.assertIn("evidence_type", data)
         self.assertIn(data["evidence_type"], ("exact_measured", "heuristic_prediction", "static_analysis"))
 
+    def test_get_api_readiness(self):
+        """Verifies GET /api/readiness returns system readiness index, grade, and 7 checks."""
+        status, _, body = self._http_get("/api/readiness")
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertIn("score", data)
+        self.assertIn("grade", data)
+        self.assertIn("checks", data)
+        self.assertEqual(len(data["checks"]), 7)
+
+    def test_get_api_components(self):
+        """Verifies GET /api/components returns all registered Windows components."""
+        status, _, body = self._http_get("/api/components")
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertIsInstance(data, list)
+        self.assertGreaterEqual(len(data), 6)
+        keys = [c["key"] for c in data]
+        self.assertIn("vcrun2022", keys)
+        self.assertIn("corefonts", keys)
+        self.assertIn("dotnet48", keys)
+
+    def test_api_prefixes_overrides_crud(self):
+        """Verifies configuring, reading, and removing prefix DLL overrides via REST API."""
+        with tempfile.TemporaryDirectory() as temp_prefix:
+            # Set override
+            status, _, body = self._http_post(
+                "/api/prefixes/overrides",
+                {"prefix_path": temp_prefix, "dll_name": "d3d11", "mode": "native,builtin"},
+            )
+            self.assertEqual(status, 200)
+            data = json.loads(body.decode("utf-8"))
+            self.assertTrue(data.get("success"))
+            self.assertEqual(data.get("overrides", {}).get("d3d11"), "native,builtin")
+
+            # Get overrides
+            status, _, get_body = self._http_get(f"/api/prefixes/overrides?prefix_path={urllib.request.quote(temp_prefix)}")
+            self.assertEqual(status, 200)
+            get_data = json.loads(get_body.decode("utf-8"))
+            self.assertEqual(get_data.get("overrides", {}).get("d3d11"), "native,builtin")
+
+            # Remove override
+            status, _, rem_body = self._http_post(
+                "/api/prefixes/overrides",
+                {"prefix_path": temp_prefix, "dll_name": "d3d11", "action": "remove"},
+            )
+            self.assertEqual(status, 200)
+            rem_data = json.loads(rem_body.decode("utf-8"))
+            self.assertTrue(rem_data.get("success"))
+            self.assertNotIn("d3d11", rem_data.get("overrides", {}))
+
+    def test_get_root_contains_interactive_visualizations(self):
+        """Verifies Web Console single-page app HTML contains pipeline topology and readiness matrix."""
+        status, _, body = self._http_get("/")
+        self.assertEqual(status, 200)
+        html_str = body.decode("utf-8")
+        self.assertIn("Pre-Flight System Readiness", html_str)
+        self.assertIn("readiness-gauge-circle", html_str)
+        self.assertIn("pipeline-topology-card", html_str)
+        self.assertIn("prefix-surgery-card", html_str)
+        self.assertIn("log-filter-bar", html_str)
+
 
 if __name__ == "__main__":
     unittest.main()

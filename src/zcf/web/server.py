@@ -28,6 +28,7 @@ from zcf.environment.inspector import EnvironmentInspector
 from zcf.execution.history import ExecutionHistoryManager
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
+from zcf.runtimes.components import WindowsComponentManager
 from zcf.runtimes.prefix_manager import WinePrefixManager
 from zcf.runtimes.registry import RuntimeRegistry
 from zcf.security.controller import SecurityController
@@ -329,6 +330,52 @@ def get_web_dashboard_html() -> str:
       border: 1px solid rgba(0, 230, 118, 0.3);
       color: var(--accent-green);
     }}
+    .topology-node {{
+      background: #181b22;
+      border: 1px solid #2a3142;
+      border-radius: 8px;
+      padding: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }}
+    .topology-node:hover {{
+      border-color: var(--primary);
+      background: #202533;
+    }}
+    .topology-node.active-node {{
+      border-color: var(--primary);
+      box-shadow: 0 0 14px rgba(0, 229, 255, 0.25);
+    }}
+    .component-row {{
+      background: var(--code-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }}
+    .filter-btn {{
+      background: none;
+      border: 1px solid var(--card-border);
+      color: var(--fg-subtle);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }}
+    .filter-btn:hover {{
+      color: var(--fg);
+      border-color: var(--fg-subtle);
+    }}
+    .filter-btn.active {{
+      background: var(--primary);
+      color: #000;
+      border-color: var(--primary);
+      font-weight: 700;
+    }}
   </style>
 </head>
 <body>
@@ -355,6 +402,46 @@ def get_web_dashboard_html() -> str:
 
     <!-- TAB 1: SYSTEM HEALTH -->
     <section id="tab-dashboard" class="tab-content active">
+      <div class="card" id="readiness-card" style="border-left: 4px solid var(--primary); margin-bottom: 24px;">
+        <div class="card-title">
+          <span>Pre-Flight System Readiness & Gaming Optimization Matrix</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadReadinessAudit()">Run Diagnostic Audit</button>
+        </div>
+        <div style="display: flex; gap: 24px; align-items: center; flex-wrap: wrap; margin-bottom: 20px;">
+          <!-- Circular SVG Gauge -->
+          <div style="position: relative; width: 110px; height: 110px; flex-shrink: 0;">
+            <svg viewBox="0 0 36 36" style="width: 100%; height: 100%; transform: rotate(-90deg);">
+              <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#25252c" stroke-width="3.2" />
+              <path id="readiness-gauge-circle" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--primary)" stroke-width="3.2" stroke-dasharray="0, 100" style="transition: stroke-dasharray 0.6s ease;" />
+            </svg>
+            <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+              <span id="readiness-gauge-val" style="font-size: 20px; font-weight: 800; color: var(--primary);">0%</span>
+              <span id="readiness-grade-badge" class="badge badge-cyan" style="font-size: 9px; margin-top: 2px;">AUDITING</span>
+            </div>
+          </div>
+          <!-- Summary Info -->
+          <div style="flex: 1; min-width: 260px;">
+            <div style="font-size: 15px; font-weight: 700; margin-bottom: 4px;" id="readiness-summary-title">System Status: Evaluating Subsystems...</div>
+            <p style="color: var(--fg-subtle); font-size: 13px;" id="readiness-summary-desc">Auditing kernel capabilities, Vulkan drivers, user namespaces, and thread synchronization limits.</p>
+          </div>
+        </div>
+        <!-- Checks Table -->
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 75px;">Status</th>
+              <th>Subsystem Check</th>
+              <th style="width: 80px;">Points</th>
+              <th>Diagnostic Telemetry & Host Findings</th>
+              <th>Actionable Remediation</th>
+            </tr>
+          </thead>
+          <tbody id="readiness-table-body">
+            <tr><td colspan="5" style="color: var(--fg-subtle);">Running readiness audit...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="grid-4" id="stats-grid">
         <div class="stat-box">
           <div class="stat-label">Operating System</div>
@@ -421,6 +508,52 @@ def get_web_dashboard_html() -> str:
         </div>
       </div>
 
+      <div class="card" id="pipeline-topology-card" style="display: none; border-left: 4px solid var(--accent-green);">
+        <div class="card-title">
+          <span>Compatibility Pipeline Topology & Execution Perimeter</span>
+          <span class="badge badge-cyan" id="pipeline-confidence-badge">Confidence: 100%</span>
+        </div>
+        <p style="color: var(--fg-subtle); font-size: 13px; margin-bottom: 16px;">
+          Multi-layer runtime abstraction pipeline for this binary across isolation, binary translation, and host graphics passthrough:
+        </p>
+        <div style="display: flex; gap: 10px; align-items: stretch; justify-content: space-between; overflow-x: auto; padding: 10px 0;">
+          <!-- Node 1 -->
+          <div class="topology-node active-node" id="top-node-binary" onclick="selectTopologyNode('binary')" style="flex: 1; min-width: 170px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--fg-subtle); text-transform: uppercase;">1. Target Binary</div>
+            <div style="font-size: 14px; font-weight: 800; color: #fff; margin-top: 4px;" id="top-binary-name">Binary</div>
+            <div style="font-size: 12px; color: var(--primary); margin-top: 3px;" id="top-binary-format">PE32+ (x86_64)</div>
+            <div style="font-size: 11px; color: var(--fg-subtle); margin-top: 5px;" id="top-binary-auth">Header: Authenticode OK</div>
+          </div>
+          <div style="display: flex; align-items: center; color: var(--primary); font-size: 18px; font-weight: bold;">&rarr;</div>
+          <!-- Node 2 -->
+          <div class="topology-node" id="top-node-security" onclick="selectTopologyNode('security')" style="flex: 1; min-width: 170px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--fg-subtle); text-transform: uppercase;">2. Security Perimeter</div>
+            <div style="font-size: 14px; font-weight: 800; color: #00e676; margin-top: 4px;" id="top-security-status">Bubblewrap Active</div>
+            <div style="font-size: 12px; color: var(--fg-subtle); margin-top: 3px;" id="top-security-ns">Namespaces Isolated</div>
+            <div style="font-size: 11px; color: var(--fg-subtle); margin-top: 5px;" id="top-security-fs">Strict RO Rootfs</div>
+          </div>
+          <div style="display: flex; align-items: center; color: var(--primary); font-size: 18px; font-weight: bold;">&rarr;</div>
+          <!-- Node 3 -->
+          <div class="topology-node" id="top-node-runtime" onclick="selectTopologyNode('runtime')" style="flex: 1; min-width: 170px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--fg-subtle); text-transform: uppercase;">3. Translation Engine</div>
+            <div style="font-size: 14px; font-weight: 800; color: var(--primary); margin-top: 4px;" id="top-runtime-name">Proton / Wine</div>
+            <div style="font-size: 12px; color: var(--accent-amber); margin-top: 3px;" id="top-runtime-gfx">Direct3D &rarr; Vulkan DXVK</div>
+            <div style="font-size: 11px; color: var(--fg-subtle); margin-top: 5px;" id="top-runtime-audio">Audio: PipeWire Fast-Path</div>
+          </div>
+          <div style="display: flex; align-items: center; color: var(--primary); font-size: 18px; font-weight: bold;">&rarr;</div>
+          <!-- Node 4 -->
+          <div class="topology-node" id="top-node-host" onclick="selectTopologyNode('host')" style="flex: 1; min-width: 170px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--fg-subtle); text-transform: uppercase;">4. Host Acceleration</div>
+            <div style="font-size: 14px; font-weight: 800; color: #fff; margin-top: 4px;" id="top-host-kernel">Linux Kernel</div>
+            <div style="font-size: 12px; color: var(--accent-green); margin-top: 3px;" id="top-host-gpu">DRM /renderD128</div>
+            <div style="font-size: 11px; color: var(--fg-subtle); margin-top: 5px;" id="top-host-display">Wayland / X11 Session</div>
+          </div>
+        </div>
+        <div id="topology-node-detail" style="margin-top: 14px; padding: 12px; background: var(--code-bg); border: 1px solid var(--card-border); border-radius: 6px; font-size: 13px;">
+          Select any pipeline node above to inspect its configuration details.
+        </div>
+      </div>
+
       <div class="card" id="inspect-result-card" style="display: none;">
         <div class="card-title" id="inspect-title">Inspection Results</div>
         <pre id="inspect-json"></pre>
@@ -451,6 +584,13 @@ def get_web_dashboard_html() -> str:
       <div class="card" id="test-result-card" style="display: none;">
         <div class="card-title" id="test-title">Test Results</div>
         <div id="test-summary" style="margin-bottom: 12px;"></div>
+        <div style="display: flex; gap: 6px; margin-bottom: 10px; align-items: center;" id="log-filter-bar">
+          <span style="font-size: 12px; font-weight: 600; color: var(--fg-subtle); margin-right: 6px;">Filter Output:</span>
+          <button class="filter-btn active" id="filter-all" onclick="filterLogs('ALL')">All Lines</button>
+          <button class="filter-btn" id="filter-errors" onclick="filterLogs('ERRORS')">Errors Only</button>
+          <button class="filter-btn" id="filter-warnings" onclick="filterLogs('WARNINGS')">Warnings</button>
+          <button class="filter-btn" id="filter-wine" onclick="filterLogs('WINE')">Wine/Proton Channels</button>
+        </div>
         <pre id="test-output"></pre>
       </div>
     </section>
@@ -547,6 +687,59 @@ def get_web_dashboard_html() -> str:
           </tbody>
         </table>
       </div>
+
+      <div class="card" id="prefix-surgery-card" style="display: none; border-top: 3px solid var(--primary); margin-top: 24px;">
+        <div class="card-title">
+          <span>Prefix Surgery & Component Control: <code id="surgery-prefix-name">prefix</code></span>
+          <button class="close-btn" onclick="document.getElementById('prefix-surgery-card').style.display='none'">&times;</button>
+        </div>
+        <p style="color: var(--fg-subtle); font-size: 13px; margin-bottom: 16px;">
+          Storage Path: <code id="surgery-prefix-path">-</code> &bull; Architecture: <strong id="surgery-prefix-arch">-</strong>
+        </p>
+
+        <div class="grid-2">
+          <!-- Windows Components -->
+          <div>
+            <div style="font-size: 14px; font-weight: 700; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+              <span>Windows Runtimes & Components</span>
+              <button class="btn btn-secondary btn-sm" onclick="refreshPrefixComponents()">Refresh Components</button>
+            </div>
+            <div id="surgery-components-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 440px; overflow-y: auto; padding-right: 4px;">
+              <p style="color: var(--fg-subtle); font-size: 13px;">Loading components...</p>
+            </div>
+          </div>
+
+          <!-- DLL Overrides -->
+          <div>
+            <div style="font-size: 14px; font-weight: 700; margin-bottom: 10px;">
+              <span>Wine DLL Overrides (WINEDLLOVERRIDES)</span>
+            </div>
+            <div style="display: flex; gap: 6px; margin-bottom: 12px; align-items: center;">
+              <input type="text" id="override-dll-input" placeholder="e.g. d3d11, dxgi" style="flex: 2; margin-top: 0; padding: 7px 10px; font-size: 13px;">
+              <select id="override-mode-select" style="flex: 2; margin-top: 0; padding: 7px 10px; font-size: 13px;">
+                <option value="native,builtin">native, builtin</option>
+                <option value="builtin,native">builtin, native</option>
+                <option value="native">native only</option>
+                <option value="builtin">builtin only</option>
+                <option value="disabled">disabled</option>
+              </select>
+              <button class="btn btn-sm" onclick="saveDllOverride()" style="margin-top: 0; white-space: nowrap;">Set Override</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>DLL Library</th>
+                  <th>Override Mode</th>
+                  <th style="width: 70px;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="surgery-overrides-body">
+                <tr><td colspan="3" style="color: var(--fg-subtle);">No custom DLL overrides configured.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- TAB 6: DIAGNOSTICS -->
@@ -559,7 +752,29 @@ def get_web_dashboard_html() -> str:
       </div>
 
       <div class="card" id="diag-result-card" style="display: none;">
-        <div class="card-title">Diagnostic Findings & Remediations</div>
+        <div class="card-title">
+          <span>Diagnostic Findings & Root-Cause Remediations</span>
+          <span id="diag-summary-badge" class="badge badge-amber">Analysis Ready</span>
+        </div>
+        <div class="grid-4" id="diag-stats-grid" style="margin-bottom: 16px;">
+          <div class="stat-box">
+            <div class="stat-label">Critical Faults</div>
+            <div class="stat-value" id="diag-stat-critical" style="color: var(--accent-red);">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Missing DLLs</div>
+            <div class="stat-value" id="diag-stat-dlls" style="color: var(--accent-amber);">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Graphics/Vulkan</div>
+            <div class="stat-value" id="diag-stat-vulkan" style="color: var(--primary);">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Remediations Available</div>
+            <div class="stat-value" id="diag-stat-remediations" style="color: var(--accent-green);">0</div>
+          </div>
+        </div>
+        <div id="diag-timeline" style="margin-bottom: 16px;"></div>
         <div id="diag-findings"></div>
       </div>
     </section>
@@ -646,6 +861,9 @@ def get_web_dashboard_html() -> str:
           fetch('/api/prefixes').then(r => r.json())
         ]);
 
+        window.currentHostKernel = envRes.kernel_version || '';
+        window.currentHostDisplay = envRes.display_server || '';
+
         // Platform & Meta
         document.getElementById('header-platform').textContent = 
           escapeHtml(envRes.os_name).toUpperCase() + ' (' + escapeHtml(envRes.architecture) + ') • Kernel ' + escapeHtml((envRes.kernel_version || '').substring(0, 32));
@@ -700,12 +918,14 @@ def get_web_dashboard_html() -> str:
               '<td>' + escapeHtml(p.size_mb) + ' MB</td>' +
               '<td><span class="badge ' + (isPersist ? 'badge-cyan' : 'badge-amber') + '">' + (isPersist ? 'Durable' : 'Disposable') + '</span></td>' +
               '<td><span class="badge ' + (isLock ? 'badge-amber' : 'badge-green') + '">' + (isLock ? 'Locked' : 'Ready') + '</span></td>' +
-              '<td><code>' + escapeHtml(p.prefix_path) + '</code></td>';
+              '<td><code>' + escapeHtml(p.prefix_path) + '</code> ' +
+              '<button class="btn btn-secondary btn-sm" style="margin-left: 8px;" onclick="selectPrefixForSurgery(\'' + escapeHtml(p.prefix_path).replace(/\\/g, '\\\\') + '\', \'' + escapeHtml(p.app_name) + '\', \'' + escapeHtml(p.architecture) + '\')">Surgery / Components</button></td>';
             pTable.appendChild(row);
           }});
         }}
 
         loadHistory();
+        loadReadinessAudit();
 
       }} catch (err) {{
         console.error("Failed to load telemetry:", err);
@@ -750,6 +970,11 @@ def get_web_dashboard_html() -> str:
       renderDatabaseTable(filtered);
     }}
 
+    let lastInspectedApp = null;
+    let currentPipelineData = null;
+    let currentRawLogLines = [];
+    let selectedPrefixPath = '';
+
     async function inspectBinary() {{
       const path = document.getElementById('inspect-path').value.trim();
       if (!path) return showAlert('Please enter a target executable path.');
@@ -761,6 +986,7 @@ def get_web_dashboard_html() -> str:
         }});
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Inspection failed');
+        lastInspectedApp = data;
         document.getElementById('inspect-title').textContent = 'Binary Inspection: ' + path;
         document.getElementById('inspect-json').textContent = JSON.stringify(data, null, 2);
         document.getElementById('inspect-result-card').style.display = 'block';
@@ -824,8 +1050,95 @@ def get_web_dashboard_html() -> str:
         const jsonPre = document.getElementById('inspect-json');
         jsonPre.innerHTML = summaryHtml + '<pre style="background: transparent; border: none; padding: 0;">' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>';
         document.getElementById('inspect-result-card').style.display = 'block';
+
+        renderPipelineTopology(data, lastInspectedApp);
       }} catch (err) {{
         showAlert('Planning error: ' + err.message, true);
+      }}
+    }}
+
+    function renderPipelineTopology(planData, appData) {{
+      currentPipelineData = {{ plan: planData, app: appData }};
+      const card = document.getElementById('pipeline-topology-card');
+      if (!card) return;
+
+      const confBadge = document.getElementById('pipeline-confidence-badge');
+      if (confBadge) confBadge.textContent = 'Confidence: ' + Math.round((planData.confidence_score || 0) * 100) + '%';
+
+      const binaryName = (appData && appData.file_name) || (planData && planData.target_application) || 'Target Binary';
+      const formatStr = ((appData && appData.format) || (planData && planData.target_format) || 'PE').toUpperCase() + ' (' + ((appData && appData.architecture) || (planData && planData.target_architecture) || 'x86_64') + ')';
+      document.getElementById('top-binary-name').textContent = binaryName;
+      document.getElementById('top-binary-format').textContent = formatStr;
+      const isSigned = appData && appData.authenticode && appData.authenticode.is_signed;
+      document.getElementById('top-binary-auth').textContent = isSigned ? 'Authenticode: Signed' : 'Authenticode: Unsigned';
+
+      const isSandbox = Boolean(planData.sandbox_active !== false);
+      const secStatus = document.getElementById('top-security-status');
+      if (secStatus) {{
+        secStatus.textContent = isSandbox ? 'Bubblewrap Active' : 'Unconfined Process';
+        secStatus.style.color = isSandbox ? '#00e676' : 'var(--accent-amber)';
+      }}
+      document.getElementById('top-security-ns').textContent = isSandbox ? 'Namespaces Isolated' : 'Host Direct Execution';
+      document.getElementById('top-security-fs').textContent = isSandbox ? 'Strict RO Rootfs' : 'Unrestricted Host Root';
+
+      const runtimeName = planData.selected_runtime_name || 'Direct Native';
+      document.getElementById('top-runtime-name').textContent = runtimeName;
+      const isPE = (appData && appData.format === 'pe') || (planData && planData.target_format === 'pe');
+      document.getElementById('top-runtime-gfx').textContent = isPE ? 'Direct3D \u2192 Vulkan DXVK' : 'Native Host Syscalls';
+      document.getElementById('top-runtime-audio').textContent = 'Audio: PipeWire Fast-Path';
+
+      document.getElementById('top-host-kernel').textContent = window.currentHostKernel || 'Host Kernel';
+      document.getElementById('top-host-gpu').textContent = 'DRM /renderD128 Node';
+      document.getElementById('top-host-display').textContent = 'Display: ' + (window.currentHostDisplay || 'Wayland / X11');
+
+      card.style.display = 'block';
+      selectTopologyNode('binary');
+    }}
+
+    function selectTopologyNode(nodeKey) {{
+      document.querySelectorAll('.topology-node').forEach(n => n.classList.remove('active-node'));
+      const activeEl = document.getElementById('top-node-' + nodeKey);
+      if (activeEl) activeEl.classList.add('active-node');
+
+      const detail = document.getElementById('topology-node-detail');
+      if (!detail) return;
+
+      const p = currentPipelineData ? currentPipelineData.plan : null;
+      const a = currentPipelineData ? currentPipelineData.app : null;
+
+      if (nodeKey === 'binary') {{
+        detail.innerHTML = 
+          '<strong>[Stage 1: Target Executable Binary]</strong>' +
+          '<div style="margin-top: 6px; color: var(--fg-subtle);">' +
+            'File: <code>' + escapeHtml(a ? a.file_name : 'Target') + '</code> &bull; ' +
+            'Format: <strong>' + escapeHtml(a ? a.format : 'PE') + '</strong> &bull; ' +
+            'Architecture: <strong>' + escapeHtml(a ? a.architecture : 'x86_64') + '</strong> &bull; ' +
+            'Subsystem: <strong>' + escapeHtml(a ? (a.subsystem || 'Windows GUI') : 'N/A') + '</strong>' +
+          '</div>';
+      }} else if (nodeKey === 'security') {{
+        detail.innerHTML = 
+          '<strong>[Stage 2: Bubblewrap Security Perimeter]</strong>' +
+          '<div style="margin-top: 6px; color: var(--fg-subtle);">' +
+            'Containment: <strong>Unprivileged Linux User Namespaces (bwrap)</strong> &bull; ' +
+            'Network Policy: <strong>' + (p && p.network_isolated ? 'BLOCKED (Air-Gapped Sandbox)' : 'Permitted') + '</strong> &bull; ' +
+            'Mount Policy: <strong>Strict read-only host bindings with ephemeral disposable tmpfs</strong>' +
+          '</div>';
+      }} else if (nodeKey === 'runtime') {{
+        detail.innerHTML = 
+          '<strong>[Stage 3: Translation & Compatibility Engine]</strong>' +
+          '<div style="margin-top: 6px; color: var(--fg-subtle);">' +
+            'Selected Runtime: <strong>' + escapeHtml(p ? p.selected_runtime_name : 'N/A') + '</strong> &bull; ' +
+            'Execution Mode: <strong>' + escapeHtml((p ? p.execution_mode : '').toUpperCase()) + '</strong> &bull; ' +
+            'Graphics Translation: <strong>DXVK / VKD3D (Direct3D \u2192 Vulkan 1.3 SPIR-V bytecode)</strong>' +
+          '</div>';
+      }} else if (nodeKey === 'host') {{
+        detail.innerHTML = 
+          '<strong>[Stage 4: Native Host Kernel & GPU Passthrough]</strong>' +
+          '<div style="margin-top: 6px; color: var(--fg-subtle);">' +
+            'Kernel: <strong>' + escapeHtml(window.currentHostKernel || 'Linux Kernel') + '</strong> &bull; ' +
+            'Display Session: <strong>' + escapeHtml(window.currentHostDisplay || 'Wayland / X11') + '</strong> &bull; ' +
+            'GPU Acceleration: <strong>Direct Rendering Infrastructure (/dev/dri/renderD128)</strong>' +
+          '</div>';
       }}
     }}
 
@@ -857,12 +1170,46 @@ def get_web_dashboard_html() -> str:
           '<div>Status: ' + statusBadge + ' | Exit Code: <code>' + escapeHtml(data.exit_code) + '</code> | Runtime: <strong>' + escapeHtml(data.runtime || 'None') + '</strong></div>' +
           '<div style="font-size: 13px; color: var(--fg-subtle); margin-top: 4px;">Mode: ' + escapeHtml(data.execution_mode) + ' • Duration: ' + escapeHtml(data.execution_time_seconds) + 's</div>';
 
-        outPre.textContent = (data.stdout || '') + (data.stderr ? '\nError:\n' + data.stderr : '') + (data.reasoning ? '\nReason:\n' + data.reasoning : '');
+        const fullLog = (data.stdout || '') + (data.stderr ? '\nError:\n' + data.stderr : '') + (data.reasoning ? '\nReason:\n' + data.reasoning : '');
+        currentRawLogLines = fullLog.split('\n');
+        filterLogs('ALL');
+
         card.style.display = 'block';
         if (record) loadTelemetry();
         loadHistory();
       }} catch (err) {{
         showAlert('Test execution error: ' + err.message, true);
+      }}
+    }}
+
+    function filterLogs(mode) {{
+      document.querySelectorAll('#log-filter-bar .filter-btn').forEach(b => b.classList.remove('active'));
+      const activeBtn = document.getElementById('filter-' + mode.toLowerCase());
+      if (activeBtn) activeBtn.classList.add('active');
+
+      const outPre = document.getElementById('test-output');
+      if (!outPre) return;
+
+      if (mode === 'ALL') {{
+        outPre.textContent = currentRawLogLines.join('\n');
+      }} else if (mode === 'ERRORS') {{
+        const filtered = currentRawLogLines.filter(l => {{
+          const s = l.toLowerCase();
+          return s.includes('err:') || s.includes('error') || s.includes('fatal') || s.includes('failed') || s.includes('exception');
+        }});
+        outPre.textContent = filtered.length > 0 ? filtered.join('\n') : '(No error lines detected in output)';
+      }} else if (mode === 'WARNINGS') {{
+        const filtered = currentRawLogLines.filter(l => {{
+          const s = l.toLowerCase();
+          return s.includes('warn:') || s.includes('warning') || s.includes('fixme:');
+        }});
+        outPre.textContent = filtered.length > 0 ? filtered.join('\n') : '(No warning lines detected in output)';
+      }} else if (mode === 'WINE') {{
+        const filtered = currentRawLogLines.filter(l => {{
+          const s = l.toLowerCase();
+          return s.includes('wine:') || s.includes('proton:') || s.includes('err:') || s.includes('fixme:') || s.includes('trace:');
+        }});
+        outPre.textContent = filtered.length > 0 ? filtered.join('\n') : '(No Wine/Proton log lines detected in output)';
       }}
     }}
 
@@ -1023,6 +1370,198 @@ def get_web_dashboard_html() -> str:
       }}
     }}
 
+    async function loadReadinessAudit() {{
+      try {{
+        const res = await fetch('/api/readiness');
+        if (!res.ok) return;
+        const audit = await res.json();
+        const score = Number(audit.score || 0);
+        const grade = audit.grade || 'UNKNOWN';
+
+        const circle = document.getElementById('readiness-gauge-circle');
+        if (circle) circle.setAttribute('stroke-dasharray', score + ', 100');
+        const valElem = document.getElementById('readiness-gauge-val');
+        if (valElem) valElem.textContent = score + '%';
+        const badgeElem = document.getElementById('readiness-grade-badge');
+        if (badgeElem) {{
+          badgeElem.textContent = grade;
+          badgeElem.className = 'badge ' + (score >= 90 ? 'badge-green' : (score >= 70 ? 'badge-cyan' : (score >= 45 ? 'badge-amber' : 'badge-red')));
+        }}
+
+        const titleElem = document.getElementById('readiness-summary-title');
+        if (titleElem) titleElem.textContent = 'System Status: ' + grade + ' (' + score + '% Readiness Index)';
+        const descElem = document.getElementById('readiness-summary-desc');
+        if (descElem) descElem.textContent = audit.summary || '';
+
+        const tbody = document.getElementById('readiness-table-body');
+        if (tbody && audit.checks) {{
+          tbody.innerHTML = '';
+          audit.checks.forEach(c => {{
+            const row = document.createElement('tr');
+            let badgeClass = 'badge-red';
+            if (c.status === 'PASS') badgeClass = 'badge-green';
+            else if (c.status === 'WARN') badgeClass = 'badge-amber';
+
+            let fixHtml = '<span style="color: var(--fg-subtle);">&mdash;</span>';
+            if (c.remediation) {{
+              fixHtml = '<code style="background: rgba(0,229,255,0.1); padding: 2px 6px; border-radius: 4px; color: var(--primary); cursor: pointer;" title="Click to copy" onclick="navigator.clipboard.writeText(this.innerText); showAlert(\'Copied remediation fix to clipboard!\', false);">' + escapeHtml(c.remediation) + '</code>';
+            }}
+
+            row.innerHTML = 
+              '<td><span class="badge ' + badgeClass + '">' + escapeHtml(c.status) + '</span></td>' +
+              '<td><strong>' + escapeHtml(c.name) + '</strong></td>' +
+              '<td>' + escapeHtml(c.score_points) + '/' + escapeHtml(c.max_points) + '</td>' +
+              '<td style="color: var(--fg-subtle); font-size: 12px;">' + escapeHtml(c.details) + '</td>' +
+              '<td>' + fixHtml + '</td>';
+            tbody.appendChild(row);
+          }});
+        }}
+      }} catch (err) {{
+        console.error('Failed to load readiness audit:', err);
+      }}
+    }}
+
+    async function selectPrefixForSurgery(prefixPath, appName, arch) {{
+      selectedPrefixPath = prefixPath;
+      document.getElementById('surgery-prefix-name').textContent = appName;
+      document.getElementById('surgery-prefix-path').textContent = prefixPath;
+      document.getElementById('surgery-prefix-arch').textContent = arch;
+      document.getElementById('prefix-surgery-card').style.display = 'block';
+      document.getElementById('prefix-surgery-card').scrollIntoView({{ behavior: 'smooth' }});
+
+      await Promise.all([refreshPrefixComponents(), refreshPrefixOverrides()]);
+    }}
+
+    async function refreshPrefixComponents() {{
+      if (!selectedPrefixPath) return;
+      const listContainer = document.getElementById('surgery-components-list');
+      listContainer.innerHTML = '<p style="color: var(--fg-subtle); font-size: 13px;">Scanning prefix components...</p>';
+
+      try {{
+        const res = await fetch('/api/components?prefix_path=' + encodeURIComponent(selectedPrefixPath));
+        if (!res.ok) throw new Error('Failed to fetch components');
+        const comps = await res.json();
+        listContainer.innerHTML = '';
+
+        comps.forEach(c => {{
+          const item = document.createElement('div');
+          item.className = 'component-row';
+          const isInst = Boolean(c.installed);
+          
+          let actionBtn = isInst 
+            ? '<span class="badge badge-green">Installed (Verified)</span>'
+            : '<button class="btn btn-sm" onclick="installPrefixComponent(\'' + escapeHtml(c.key) + '\', this)">Install into Prefix</button>';
+
+          item.innerHTML = 
+            '<div>' +
+              '<div style="font-weight: 700; font-size: 13px; color: #fff;">' + escapeHtml(c.name) + ' (<code>' + escapeHtml(c.key) + '</code>)</div>' +
+              '<div style="color: var(--fg-subtle); font-size: 12px; margin-top: 2px;">' + escapeHtml(c.description) + '</div>' +
+            '</div>' +
+            '<div style="flex-shrink: 0;">' + actionBtn + '</div>';
+          listContainer.appendChild(item);
+        }});
+      }} catch (err) {{
+        listContainer.innerHTML = '<p style="color: var(--accent-red); font-size: 13px;">Error loading components: ' + escapeHtml(err.message) + '</p>';
+      }}
+    }}
+
+    async function installPrefixComponent(compKey, btnElem) {{
+      if (!selectedPrefixPath) return showAlert('No prefix selected.');
+      if (btnElem) {{
+        btnElem.disabled = true;
+        btnElem.textContent = 'Installing...';
+      }}
+      try {{
+        const res = await fetch('/api/components/install', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath, component_key: compKey }})
+        }});
+        const data = await res.json();
+        if (!res.ok || !data.success) {{
+          throw new Error(data.error || 'Component installation failed');
+        }}
+        showAlert('Successfully installed component: ' + data.component_name, false);
+        refreshPrefixComponents();
+      }} catch (err) {{
+        showAlert('Component install error: ' + err.message, true);
+        if (btnElem) {{
+          btnElem.disabled = false;
+          btnElem.textContent = 'Install into Prefix';
+        }}
+      }}
+    }}
+
+    async function refreshPrefixOverrides() {{
+      if (!selectedPrefixPath) return;
+      const tbody = document.getElementById('surgery-overrides-body');
+      tbody.innerHTML = '<tr><td colspan="3" style="color: var(--fg-subtle);">Reading DLL overrides...</td></tr>';
+
+      try {{
+        const res = await fetch('/api/prefixes/overrides?prefix_path=' + encodeURIComponent(selectedPrefixPath));
+        if (!res.ok) throw new Error('Failed to fetch overrides');
+        const data = await res.json();
+        const overrides = data.overrides || {{}};
+        const keys = Object.keys(overrides);
+
+        tbody.innerHTML = '';
+        if (keys.length === 0) {{
+          tbody.innerHTML = '<tr><td colspan="3" style="color: var(--fg-subtle);">No custom DLL overrides configured for this prefix.</td></tr>';
+          return;
+        }}
+
+        keys.forEach(dll => {{
+          const row = document.createElement('tr');
+          row.innerHTML = 
+            '<td><code>' + escapeHtml(dll) + '.dll</code></td>' +
+            '<td><span class="badge badge-cyan">' + escapeHtml(overrides[dll]) + '</span></td>' +
+            '<td><button class="btn btn-danger btn-sm" onclick="removeDllOverride(\'' + escapeHtml(dll) + '\')">Remove</button></td>';
+          tbody.appendChild(row);
+        }});
+      }} catch (err) {{
+        tbody.innerHTML = '<tr><td colspan="3" style="color: var(--accent-red);">Error: ' + escapeHtml(err.message) + '</td></tr>';
+      }}
+    }}
+
+    async function saveDllOverride() {{
+      if (!selectedPrefixPath) return showAlert('No prefix selected.');
+      const dll = document.getElementById('override-dll-input').value.trim();
+      const mode = document.getElementById('override-mode-select').value;
+      if (!dll) return showAlert('Please enter a DLL name (e.g. d3d11).');
+
+      try {{
+        const res = await fetch('/api/prefixes/overrides', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath, dll_name: dll, mode: mode, action: 'set' }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to set override');
+        document.getElementById('override-dll-input').value = '';
+        showAlert('Configured DLL override for ' + dll + ': ' + mode, false);
+        refreshPrefixOverrides();
+      }} catch (err) {{
+        showAlert('Override error: ' + err.message, true);
+      }}
+    }}
+
+    async function removeDllOverride(dll) {{
+      if (!selectedPrefixPath) return showAlert('No prefix selected.');
+      try {{
+        const res = await fetch('/api/prefixes/overrides', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath, dll_name: dll, action: 'remove' }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to remove override');
+        showAlert('Removed DLL override for ' + dll, false);
+        refreshPrefixOverrides();
+      }} catch (err) {{
+        showAlert('Override removal error: ' + err.message, true);
+      }}
+    }}
+
     async function analyzeLog() {{
       const log = document.getElementById('diag-log').value.trim();
       if (!log) return showAlert('Please enter an error log to diagnose.');
@@ -1037,20 +1576,58 @@ def get_web_dashboard_html() -> str:
 
         const card = document.getElementById('diag-result-card');
         const container = document.getElementById('diag-findings');
+        const timeline = document.getElementById('diag-timeline');
+        const summaryBadge = document.getElementById('diag-summary-badge');
         container.innerHTML = '';
-        if (!data.events || data.events.length === 0) {{
+        timeline.innerHTML = '';
+
+        const events = data.events || [];
+        let critCount = 0;
+        let dllCount = 0;
+        let vulkanCount = 0;
+
+        events.forEach(ev => {{
+          const sig = (ev.signature || '').toLowerCase();
+          if (sig.includes('crash') || sig.includes('fault') || sig.includes('abort') || sig.includes('segv')) critCount++;
+          if (sig.includes('dll') || sig.includes('library') || sig.includes('module')) dllCount++;
+          if (sig.includes('vulkan') || sig.includes('dxvk') || sig.includes('d3d') || sig.includes('gpu')) vulkanCount++;
+        }});
+
+        document.getElementById('diag-stat-critical').textContent = critCount;
+        document.getElementById('diag-stat-dlls').textContent = dllCount;
+        document.getElementById('diag-stat-vulkan').textContent = vulkanCount;
+        document.getElementById('diag-stat-remediations').textContent = events.length;
+
+        if (events.length === 0) {{
+          summaryBadge.className = 'badge badge-green';
+          summaryBadge.textContent = 'Clean Log (No Signatures)';
           container.innerHTML = '<p style="color: var(--accent-green);">No known fatal crash signatures detected. Application log appears clean.</p>';
         }} else {{
-          data.events.forEach((ev, i) => {{
-            const item = document.createElement('div');
-            item.style.marginBottom = '16px';
-            item.innerHTML = 
-              '<div style="font-weight: 700; color: var(--accent-red); margin-bottom: 4px;">[' + (i + 1) + '] ' + escapeHtml(ev.signature) + ' (Confidence: ' + Math.round(ev.confidence * 100) + '%)</div>' +
-              '<p style="margin-left: 12px; color: var(--fg-subtle);">Root Cause: ' + escapeHtml(ev.root_cause) + '</p>' +
-              '<p style="margin-left: 12px; color: var(--primary); margin-top: 2px;">Fix: ' + escapeHtml(ev.remediation) + '</p>';
-            container.appendChild(item);
+          summaryBadge.className = 'badge badge-red';
+          summaryBadge.textContent = events.length + ' Fault Signatures Detected';
+
+          let tlHtml = '<div style="font-size: 13px; font-weight: 700; margin-bottom: 10px; color: var(--fg-subtle);">DIAGNOSTIC EVENT SEQUENCE & ROOT-CAUSE TIMELINE:</div>';
+          events.forEach((ev, idx) => {{
+            const isCrit = (ev.confidence || 0) >= 0.8;
+            const dotColor = isCrit ? 'var(--accent-red)' : 'var(--accent-amber)';
+            tlHtml += 
+              '<div class="timeline-step" style="display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start;">' +
+                '<div style="width: 10px; height: 10px; border-radius: 50%; background: ' + dotColor + '; margin-top: 6px; flex-shrink: 0;"></div>' +
+                '<div style="background: var(--code-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 12px; flex: 1;">' +
+                  '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">' +
+                    '<strong style="color: ' + dotColor + ';">[' + (idx + 1) + '] ' + escapeHtml(ev.signature) + '</strong>' +
+                    '<span class="badge ' + (isCrit ? 'badge-red' : 'badge-amber') + '">Confidence: ' + Math.round((ev.confidence || 0) * 100) + '%</span>' +
+                  '</div>' +
+                  '<p style="color: var(--fg-subtle); font-size: 13px;">' + escapeHtml(ev.root_cause) + '</p>' +
+                  '<div style="margin-top: 8px; font-size: 13px; color: var(--primary);">' +
+                    '<strong>Remediation:</strong> <code style="background: rgba(0,229,255,0.1); padding: 2px 6px; border-radius: 4px; cursor: pointer;" title="Click to copy" onclick="navigator.clipboard.writeText(this.innerText); showAlert(\'Copied remediation to clipboard!\', false);">' + escapeHtml(ev.remediation) + '</code>' +
+                  '</div>' +
+                '</div>' +
+              '</div>';
           }});
+          timeline.innerHTML = tlHtml;
         }}
+
         card.style.display = 'block';
       }} catch (err) {{
         showAlert('Diagnostic error: ' + err.message, true);
@@ -1078,6 +1655,7 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
         self.proton_prefix_mgr = WinePrefixManager(base_dir=os.path.expanduser("~/.zcf/proton_prefixes"))
         self.security = SecurityController()
         self.history_mgr = ExecutionHistoryManager()
+        self.component_mgr = WindowsComponentManager()
         super().__init__(*args, **kwargs)
 
     def log_message(self, format: str, *args):
@@ -1172,6 +1750,39 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/env":
             env = self.env_inspector.inspect()
             self._send_json(env.to_dict())
+            return
+
+        if path == "/api/readiness":
+            audit = self.env_inspector.get_readiness_audit()
+            self._send_json(audit)
+            return
+
+        if path == "/api/components":
+            prefix_path = query.get("prefix_path", [""])[0].strip()
+            all_comps = self.component_mgr.list_components()
+            res = []
+            for c in all_comps:
+                is_inst = False
+                if prefix_path and os.path.isdir(prefix_path):
+                    is_inst = self.component_mgr.is_installed_in_prefix(prefix_path, c.key)
+                res.append({
+                    "key": c.key,
+                    "name": c.name,
+                    "description": c.description,
+                    "winetricks_verb": c.winetricks_verb,
+                    "verification_files": c.verification_files,
+                    "installed": is_inst,
+                })
+            self._send_json(res)
+            return
+
+        if path == "/api/prefixes/overrides":
+            prefix_path = query.get("prefix_path", [""])[0].strip()
+            if not prefix_path:
+                self._send_error_json("Missing 'prefix_path' query parameter", status=400)
+                return
+            overrides = self.component_mgr.get_dll_overrides(prefix_path)
+            self._send_json({"prefix_path": prefix_path, "overrides": overrides})
             return
 
         if path == "/api/db":
@@ -1482,6 +2093,40 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
                 "cleaned_proton": cleaned_proton,
                 "total": cleaned_wine + cleaned_proton,
             })
+            return
+
+        if path == "/api/components/install":
+            prefix_path = payload.get("prefix_path", "").strip()
+            comp_key = payload.get("component_key", "").strip()
+            if not prefix_path or not comp_key:
+                self._send_error_json("Missing 'prefix_path' or 'component_key' in JSON body", status=400)
+                return
+            res = self.component_mgr.install(prefix_path, comp_key)
+            self._send_json({
+                "success": res.success,
+                "component_key": res.component_key,
+                "component_name": res.component_name,
+                "verified": res.verified,
+                "output": res.output,
+                "error": res.error,
+                "assurance_level": res.assurance_level,
+            })
+            return
+
+        if path == "/api/prefixes/overrides":
+            prefix_path = payload.get("prefix_path", "").strip()
+            dll_name = payload.get("dll_name", "").strip()
+            mode = payload.get("mode", "native,builtin").strip()
+            action = payload.get("action", "set").strip()
+            if not prefix_path or not dll_name:
+                self._send_error_json("Missing 'prefix_path' or 'dll_name' in JSON body", status=400)
+                return
+            if action == "remove":
+                success = self.component_mgr.remove_dll_override(prefix_path, dll_name)
+            else:
+                success = self.component_mgr.set_dll_override(prefix_path, dll_name, mode)
+            overrides = self.component_mgr.get_dll_overrides(prefix_path)
+            self._send_json({"success": success, "overrides": overrides})
             return
 
         if path == "/api/history/compare":

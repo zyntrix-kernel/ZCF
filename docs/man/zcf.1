@@ -39,6 +39,9 @@ Performs non-executing static analysis of a binary or script, extracting archite
 .B env [\fB\-\-json\fR]
 Audits the host environment and detects installed compatibility runtimes.
 .TP
+.B doctor [\fB\-\-json\fR]
+Executes a pre-flight system readiness audit evaluating Vulkan drivers, thread synchronization limits, multiarch support, bubblewrap namespaces, DRI GPU nodes, and virtual displays with actionable remediation guidance.
+.TP
 .B plan \fIPATH\fR [\fB\-\-json\fR]
 Generates a deterministic compatibility plan with explainable confidence scoring.
 .TP

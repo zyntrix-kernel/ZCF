@@ -214,6 +214,44 @@ def cmd_env(args):
         sys.exit(1)
 
 
+def cmd_doctor(args):
+    inspector = EnvironmentInspector()
+    try:
+        audit = inspector.get_readiness_audit()
+        if getattr(args, "json", False):
+            print(json.dumps(audit, indent=2))
+            return
+
+        score = audit["score"]
+        grade = audit["grade"]
+        summary = audit["summary"]
+
+        print("\n" + "=" * 66)
+        print("      ZYNTRIX COMPATIBILITY FABRIC (ZCF) - SYSTEM DOCTOR")
+        print("=" * 66)
+        print(f"  System Readiness Index : [ {score}% ]  (GRADE: {grade})")
+        print(f"  Diagnostic Summary     : {summary}")
+        print("-" * 66)
+        print("  PRE-FLIGHT SUBSYSTEM READINESS AUDIT:")
+        print("-" * 66)
+
+        for check in audit["checks"]:
+            status = check["status"]
+            symbol = f"[{status}]"
+            print(f"  {symbol:<6} {check['name']} ({check['score_points']}/{check['max_points']} pts)")
+            print(f"         {check['details']}")
+            if check.get("remediation"):
+                print(f"         -> Actionable Fix: {check['remediation']}")
+            print()
+
+        print("=" * 66 + "\n")
+        if score < 45:
+            sys.exit(1)
+    except Exception as e:
+        print(f"Error during readiness audit: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_plan(args):
     app_inspector = ApplicationInspector()
     env_inspector = EnvironmentInspector()
@@ -815,6 +853,11 @@ def main(argv: Optional[List[str]] = None):
     p_env = subparsers.add_parser("env", help="Inspect host environment and compatibility runtimes")
     p_env.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_env.set_defaults(func=cmd_env)
+
+    # doctor
+    p_doc = subparsers.add_parser("doctor", help="Run pre-flight system readiness audit and gaming optimization check")
+    p_doc.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_doc.set_defaults(func=cmd_doctor)
 
     # plan
     p_plan = subparsers.add_parser("plan", help="Generate compatibility plan for an application")
