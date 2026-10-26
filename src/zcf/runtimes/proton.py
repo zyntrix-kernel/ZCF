@@ -34,14 +34,23 @@ PROTON_SEARCH_PATHS = [
 class ProtonAdapter(BaseRuntimeAdapter):
     """Adapter for running Windows gaming and high-performance applications via Proton."""
 
-    def __init__(self, prefix_manager: Optional[WinePrefixManager] = None):
+    def __init__(
+        self,
+        prefix_manager: Optional[WinePrefixManager] = None,
+        custom_id: Optional[str] = None,
+        custom_name: Optional[str] = None,
+        proton_binary: Optional[str] = None,
+    ):
         self.prefix_manager = prefix_manager or WinePrefixManager(base_dir=os.path.expanduser("~/.zcf/proton_prefixes"))
+        self.custom_id = custom_id
+        self.custom_name = custom_name
+        self.proton_binary = proton_binary
 
     def get_id(self) -> str:
-        return "runtime.proton"
+        return self.custom_id or "runtime.proton"
 
     def get_name(self) -> str:
-        return "Valve Proton Gaming Runtime"
+        return self.custom_name or "Valve Proton Gaming Runtime"
 
     def get_version(self, env: Optional[EnvironmentReport] = None) -> Optional[str]:
         if env:
@@ -78,6 +87,10 @@ class ProtonAdapter(BaseRuntimeAdapter):
         }
 
     def _find_proton_binary(self) -> Optional[str]:
+        # 0. Custom proton binary
+        if self.proton_binary and (os.path.isfile(self.proton_binary) or shutil.which(self.proton_binary)):
+            return self.proton_binary
+
         # 1. PATH lookup
         on_path = shutil.which("proton")
         if on_path:

@@ -48,6 +48,27 @@ def cmd_console(args):
 
 def cmd_run(args):
     from zcf.execution.runner import ExecutionOrchestrator
+    from zcf.execution.tuning import GamingTuningConfig, get_tuning_preset
+
+    tuning = None
+    if getattr(args, "tuning_preset", None):
+        tuning = get_tuning_preset(args.tuning_preset)
+    elif any([
+        getattr(args, "gamemode", False),
+        getattr(args, "gamescope", False),
+        getattr(args, "mangohud", False),
+        getattr(args, "upscale", None),
+    ]):
+        tuning = GamingTuningConfig(
+            enabled=True,
+            use_gamemode=getattr(args, "gamemode", False),
+            use_gamescope=getattr(args, "gamescope", False),
+            upscaling_filter=getattr(args, "upscale", "fsr") or "fsr",
+            fsr_sharpness=getattr(args, "fsr_sharpness", 5),
+            fps_limit=getattr(args, "fps_limit", None),
+            use_mangohud=getattr(args, "mangohud", False),
+        )
+
     orchestrator = ExecutionOrchestrator()
     try:
         code = orchestrator.run(
@@ -60,11 +81,294 @@ def cmd_run(args):
             auto_install=args.install_deps,
             timeout=getattr(args, "timeout", None),
             allow_network=getattr(args, "allow_network", False),
+            tuning=tuning,
         )
         sys.exit(code)
     except Exception as e:
         print(f"[ZCF Run Error] {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_runners(args):
+    from zcf.runtimes.fleet import RunnerFleetManager
+    fleet = RunnerFleetManager()
+    action = args.fleet_action
+
+    if action == "list":
+        runners = fleet.discover_local_runners()
+        if getattr(args, "json", False):
+            print(json.dumps([r.to_dict() for r in runners], indent=2))
+            return
+        format_header(f"Discovered Compatibility Runners ({len(runners)} found)")
+        if not runners:
+            print("  No compatibility runners discovered.")
+        for r in runners:
+            sys_mark = "[SYSTEM]" if r.is_system else "[CUSTOM]"
+            caps = ", ".join(r.capabilities) if r.capabilities else "none"
+            print(f"  - {sys_mark} {r.name} ({r.runner_type})")
+            print(f"    ID:           {r.id}")
+            print(f"    Path:         {r.path}")
+            print(f"    Capabilities: {caps}\n")
+
+    elif action == "available":
+        releases = fleet.fetch_available_releases(limit=getattr(args, "limit", 10))
+        if getattr(args, "json", False):
+            print(json.dumps([rel.to_dict() for rel in releases], indent=2))
+            return
+        format_header(f"Available Upstream Runners (GE-Proton Releases)")
+        for rel in releases:
+            sz_mb = rel.size_bytes / (1024 * 1024) if rel.size_bytes else 0
+            print(f"  * {rel.name} ({rel.tag_name}) - {sz_mb:.1f} MB [{rel.published_at[:10]}]")
+            print(f"    Download: {rel.download_url}")
+            if rel.checksum_url:
+                print(f"    SHA-512:  {rel.checksum_url}")
+            print()
+
+    elif action == "install":
+        archive_path = args.archive_or_tag
+        if not os.path.isfile(archive_path):
+            print(f"Fetching release manifest for '{archive_path}'...")
+            releases = fleet.fetch_available_releases(limit=20)
+            target_rel = next((r for r in releases if r.tag_name == archive_path or r.name == archive_path), None)
+            if not target_rel:
+                print(f"Error: Archive file not found and '{archive_path}' does not match available releases.", file=sys.stderr)
+                sys.exit(1)
+            import urllib.request
+            staging_tar = os.path.join(fleet.runners_dir, f"{target_rel.tag_name}.tar.gz")
+            print(f"Downloading {target_rel.name} from {target_rel.download_url}...")
+            urllib.request.urlretrieve(target_rel.download_url, staging_tar)
+            archive_path = staging_tar
+
+        try:
+            print(f"Installing runner from archive '{archive_path}'...")
+            installed = fleet.install_runner(archive_path)
+            print(f"Runner successfully installed: {installed.name} ({installed.id})")
+            print(f"Installed to: {installed.path}")
+        except Exception as e:
+            print(f"Failed to install runner: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+def cmd_snapshot(args):
+    from zcf.runtimes.snapshots import PrefixSnapshotManager
+    mgr = PrefixSnapshotManager()
+    action = args.snapshot_action
+    prefix = args.prefix_path
+
+    if action == "create":
+        label = getattr(args, "label", None) or "Manual Snapshot"
+        try:
+            snap = mgr.create_snapshot(prefix, label=label, trigger="manual")
+            if getattr(args, "json", False):
+                print(json.dumps(snap.to_dict(), indent=2))
+            else:
+                print(f"Successfully created snapshot '{snap.id}' ({snap.label})")
+                print(f"Size: {snap.size_bytes} bytes, Files: {', '.join(snap.files_preserved)}")
+        except Exception as e:
+            print(f"Error creating snapshot: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "list":
+        snaps = mgr.list_snapshots(prefix)
+        if getattr(args, "json", False):
+            print(json.dumps([s.to_dict() for s in snaps], indent=2))
+            return
+        format_header(f"Time-Machine Snapshots for {prefix} ({len(snaps)} total)")
+        if not snaps:
+            print("  No snapshots found for this prefix.")
+        for s in snaps:
+            print(f"  - [{s.id}] {s.label} ({s.trigger})")
+            print(f"    Created: {s.created_at} | Size: {s.size_bytes} B | Preserved: {', '.join(s.files_preserved)}")
+
+    elif action == "restore":
+        snap_id = args.snapshot_id
+        try:
+            mgr.restore_snapshot(prefix, snap_id)
+            print(f"Successfully rolled back prefix to snapshot '{snap_id}'.")
+        except Exception as e:
+            print(f"Error restoring snapshot: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "delete":
+        snap_id = args.snapshot_id
+        if mgr.delete_snapshot(prefix, snap_id):
+            print(f"Deleted snapshot '{snap_id}'.")
+        else:
+            print(f"Snapshot '{snap_id}' not found.", file=sys.stderr)
+            sys.exit(1)
+
+
+def cmd_vault(args):
+    from zcf.runtimes.vault import GameSaveVault
+    vault = GameSaveVault()
+    action = args.vault_action
+
+    if action == "discover":
+        prefix = args.prefix_path
+        app_name = getattr(args, "app", None)
+        locations = vault.discover_save_locations(prefix, app_name_filter=app_name)
+        if getattr(args, "json", False):
+            print(json.dumps([loc.to_dict() for loc in locations], indent=2))
+            return
+        format_header(f"Discovered Save Data Locations ({len(locations)} found)")
+        if not locations:
+            print("  No game save locations discovered.")
+        for loc in locations:
+            sz_kb = loc.size_bytes / 1024
+            print(f"  - {loc.folder_name} ({loc.category}) - {sz_kb:.1f} KB, {loc.files_count} files")
+            print(f"    Path: drive_c/{loc.relative_to_drive_c}")
+
+    elif action == "backup":
+        prefix = args.prefix_path
+        app_name = args.app
+        if not app_name:
+            print("Error: --app <name> is required for save backup.", file=sys.stderr)
+            sys.exit(1)
+        notes = getattr(args, "notes", "")
+        try:
+            entry = vault.backup_save(prefix, app_name, notes=notes)
+            if getattr(args, "json", False):
+                print(json.dumps(entry.to_dict(), indent=2))
+            else:
+                sz_kb = entry.size_bytes / 1024
+                print(f"Saved game successfully backed up to Vault!")
+                print(f"  Vault ID: {entry.vault_id}")
+                print(f"  App:      {entry.app_name}")
+                print(f"  Archive:  {entry.archive_path} ({sz_kb:.1f} KB)")
+                print(f"  SHA-256:  {entry.sha256}")
+        except Exception as e:
+            print(f"Backup failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "list":
+        app_name = getattr(args, "app", None)
+        backups = vault.list_backups(app_name_filter=app_name)
+        if getattr(args, "json", False):
+            print(json.dumps([b.to_dict() for b in backups], indent=2))
+            return
+        format_header(f"Save Game Vault Backups ({len(backups)} total)")
+        if not backups:
+            print("  No save game backups found in vault.")
+        for b in backups:
+            sz_kb = b.size_bytes / 1024
+            print(f"  - [{b.vault_id}] {b.app_name} - {sz_kb:.1f} KB ({b.created_at[:19]})")
+            print(f"    Source Prefix: {b.source_prefix}")
+            print(f"    SHA-256:       {b.sha256[:16]}...")
+
+    elif action == "restore":
+        vault_id = args.vault_id
+        target_prefix = args.prefix_path
+        try:
+            vault.restore_save(vault_id, target_prefix)
+            print(f"Successfully restored save '{vault_id}' into prefix '{target_prefix}'.")
+        except Exception as e:
+            print(f"Restore failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "delete":
+        vault_id = args.vault_id
+        if vault.delete_backup(vault_id):
+            print(f"Deleted backup '{vault_id}'.")
+        else:
+            print(f"Backup '{vault_id}' not found.", file=sys.stderr)
+            sys.exit(1)
+
+
+def cmd_taskmgr(args):
+    from zcf.runtimes.tasks import PrefixTaskManager
+    tm = PrefixTaskManager()
+    action = args.taskmgr_action
+
+    if action == "list":
+        prefix = getattr(args, "prefix", None)
+        procs = tm.list_prefix_processes(prefix)
+        if getattr(args, "json", False):
+            print(json.dumps([p.to_dict() for p in procs], indent=2))
+            return
+        format_header(f"Active Prefix Processes ({len(procs)} running)")
+        if not procs:
+            print("  No active prefix processes detected.")
+        for p in procs:
+            print(f"  - PID {p.pid:6d} | RSS: {p.rss_mb:6.1f} MB | {p.name}")
+            if p.cmdline:
+                print(f"    Cmd: {p.cmdline[:80]}")
+
+    elif action == "kill":
+        prefix = args.prefix_path
+        result = tm.kill_prefix_processes(prefix)
+        print(f"Terminated processes for prefix {prefix}: killed PIDs {result.get('killed_pids', [])}")
+
+    elif action == "reset-locks":
+        prefix = args.prefix_path
+        removed = tm.reset_prefix_locks(prefix)
+        print(f"Cleared {len(removed)} locks in {prefix}: {', '.join(removed) if removed else 'none'}")
+
+    elif action == "launch":
+        prefix = args.prefix_path
+        tool = args.tool
+        try:
+            res = tm.launch_wine_tool(prefix, tool)
+            print(f"Launched {tool} (PID: {res.get('pid')}) in prefix {prefix}")
+        except Exception as e:
+            print(f"Failed to launch tool: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+def cmd_prescribe(args):
+    from zcf.diagnostics.analyzer import DiagnosticEngine
+    from zcf.diagnostics.prescriptions import PrescriptionEngine
+
+    diag = DiagnosticEngine()
+    rx_engine = PrescriptionEngine()
+    action = args.prescribe_action
+
+    if not os.path.isfile(args.log_path):
+        print(f"Error: Log file not found: {args.log_path}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(args.log_path, "r", encoding="utf-8", errors="ignore") as f:
+        log_text = f.read()
+
+    events = diag.analyze_log(log_text)
+    app_name = getattr(args, "app", "application.exe") or "application.exe"
+    prefix = getattr(args, "prefix", None)
+
+    rx = rx_engine.synthesize(events, app_name=app_name, prefix_path=prefix)
+
+    if action == "generate":
+        if getattr(args, "json", False):
+            print(json.dumps(rx.to_dict(), indent=2))
+            return
+        format_header(f"Autonomous Healing Prescription [{rx.id}] for {rx.target_app}")
+        print(f"  Root Causes Identified ({len(rx.root_causes)}):")
+        for rc in rx.root_causes:
+            print(f"    - {rc}")
+        if rx.recommended_runner:
+            print(f"\n  Recommended Compatibility Runner: {rx.recommended_runner}")
+        if rx.components_to_install:
+            print(f"  Components to Auto-Install:       {', '.join(rx.components_to_install)}")
+        if rx.dll_overrides_to_set:
+            print(f"  DLL Overrides to Apply:           {rx.dll_overrides_to_set}")
+        if rx.env_vars_to_set:
+            print(f"  Environment Variables:            {rx.env_vars_to_set}")
+        if rx.recommended_tuning:
+            print(f"  Esports/Gaming Tuning:            {rx.recommended_tuning}")
+
+    elif action == "apply":
+        if not prefix:
+            print("Error: --prefix <path> is required to apply prescription.", file=sys.stderr)
+            sys.exit(1)
+        dry_run = getattr(args, "dry_run", False)
+        try:
+            res = rx_engine.apply(rx, prefix, dry_run=dry_run)
+            print(f"Prescription {rx.id} applied to {prefix}:")
+            for act in res.get("actions", []):
+                print(f"  + {act}")
+            if res.get("snapshot_id"):
+                print(f"Safety Snapshot ID: {res.get('snapshot_id')}")
+        except Exception as e:
+            print(f"Failed to apply prescription: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 def cmd_service(args):
@@ -823,7 +1127,60 @@ def main(argv: Optional[List[str]] = None):
     p_run.add_argument("--timeout", type=int, default=None, help="Execution timeout in seconds")
     p_run.add_argument("--headless", action="store_true", help="Force virtual Xvfb display server")
     p_run.add_argument("--install-deps", action="store_true", help="Automatically install missing dependencies")
+    p_run.add_argument("--gamemode", action="store_true", help="Wrap execution with Feral GameMode (gamemoderun)")
+    p_run.add_argument("--gamescope", action="store_true", help="Execute inside Gamescope micro-compositor")
+    p_run.add_argument("--upscale", choices=["fsr", "nis", "pixel", "linear"], help="Upscaling filter in Gamescope")
+    p_run.add_argument("--fsr-sharpness", type=int, default=5, help="FSR upscaler sharpness (0-10)")
+    p_run.add_argument("--fps-limit", type=int, help="Frames per second limit / refresh rate cap")
+    p_run.add_argument("--mangohud", action="store_true", help="Enable MangoHud real-time performance overlay")
+    p_run.add_argument("--tuning-preset", choices=["esports", "4k_fidelity", "power_saver", "minimal_overlay"], help="Use a preconfigured gaming tuning profile")
     p_run.set_defaults(func=cmd_run)
+
+    # runners (fleet manager)
+    p_runners = subparsers.add_parser("runners", help="Discover, download, and manage Proton and Wine compatibility runners")
+    p_runners.add_argument("fleet_action", choices=["list", "available", "install"], help="Action to perform")
+    p_runners.add_argument("archive_or_tag", nargs="?", default=None, help="Archive path or release tag (for 'install')")
+    p_runners.add_argument("--limit", type=int, default=10, help="Max releases to query")
+    p_runners.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_runners.set_defaults(func=cmd_runners)
+
+    # snapshot (time-machine)
+    p_snap = subparsers.add_parser("snapshot", help="Time-Machine instant restore points and prefix rollbacks")
+    p_snap.add_argument("snapshot_action", choices=["create", "list", "restore", "delete"], help="Action to perform")
+    p_snap.add_argument("prefix_path", help="Path to Wine/Proton prefix")
+    p_snap.add_argument("snapshot_id", nargs="?", default=None, help="Snapshot ID (for 'restore' or 'delete')")
+    p_snap.add_argument("--label", help="Descriptive label for snapshot (for 'create')")
+    p_snap.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_snap.set_defaults(func=cmd_snapshot)
+
+    # vault (game saves)
+    p_vault = subparsers.add_parser("vault", help="Universal Game Save Vault for discovery, backup, and prefix migration")
+    p_vault.add_argument("vault_action", choices=["discover", "backup", "list", "restore", "delete"], help="Action to perform")
+    p_vault.add_argument("prefix_path", nargs="?", default=None, help="Path to prefix (for 'discover', 'backup', 'restore')")
+    p_vault.add_argument("vault_id", nargs="?", default=None, help="Vault ID (for 'restore' or 'delete')")
+    p_vault.add_argument("--app", help="Application name filter or label")
+    p_vault.add_argument("--notes", default="", help="Notes for save backup")
+    p_vault.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_vault.set_defaults(func=cmd_vault)
+
+    # taskmgr (prefix process monitor)
+    p_tm = subparsers.add_parser("taskmgr", help="Monitor active processes, kill wineserver, and launch Wine diagnostic tools")
+    p_tm.add_argument("taskmgr_action", choices=["list", "kill", "reset-locks", "launch"], help="Action to perform")
+    p_tm.add_argument("prefix_path", nargs="?", default=None, help="Target prefix path")
+    p_tm.add_argument("tool", nargs="?", default=None, help="Wine tool to launch (winecfg, regedit, taskmgr, control)")
+    p_tm.add_argument("--prefix", help="Optional prefix filter for 'list'")
+    p_tm.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_tm.set_defaults(func=cmd_taskmgr)
+
+    # prescribe (healing engine)
+    p_rx = subparsers.add_parser("prescribe", help="Autonomous healing engine to analyze crashes and auto-repair prefixes")
+    p_rx.add_argument("prescribe_action", choices=["generate", "apply"], help="Action to perform")
+    p_rx.add_argument("log_path", help="Path to crash or error log file")
+    p_rx.add_argument("--app", default="application.exe", help="Application name")
+    p_rx.add_argument("--prefix", help="Target prefix path to heal")
+    p_rx.add_argument("--dry-run", action="store_true", help="Simulate repair without modifying prefix")
+    p_rx.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_rx.set_defaults(func=cmd_prescribe)
 
     # integrate
     p_int = subparsers.add_parser("integrate", help="Manage Linux desktop application menu shortcuts")

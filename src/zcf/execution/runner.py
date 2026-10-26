@@ -33,6 +33,7 @@ from zcf.environment.inspector import EnvironmentInspector
 from zcf.execution.display import VirtualDisplayManager
 from zcf.execution.history import ExecutionHistoryManager
 from zcf.execution.installer import PackageInstallerBridge
+from zcf.execution.tuning import GamingTuningConfig, build_tuning_pipeline
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
 from zcf.runtimes.prefix_manager import WinePrefixManager
@@ -82,6 +83,7 @@ class ExecutionOrchestrator:
         auto_install: bool = False,
         stream_callback: Optional[Callable[[str], None]] = None,
         timeout: Optional[int] = None,
+        tuning: Optional[GamingTuningConfig] = None,
     ) -> ExecutionResult:
         """
         Executes an application across the full 9-phase compatibility lifecycle.
@@ -254,6 +256,10 @@ class ExecutionOrchestrator:
                         raw_cmd, working_dir, sb_policy, allow_unconfined=allow_unconfined
                     )
                     sandbox_active = True
+
+            # Gaming tuning pipeline wrapper
+            if tuning and tuning.enabled:
+                final_cmd, sanitized_env = build_tuning_pipeline(final_cmd, tuning=tuning, env=sanitized_env)
 
             # Notify user desktop
             self.notifier.notify_starting(app.file_name, adapter.get_name())
@@ -636,6 +642,7 @@ class ExecutionOrchestrator:
         auto_install: bool = False,
         timeout: Optional[int] = None,
         allow_network: Optional[bool] = None,
+        tuning: Optional[GamingTuningConfig] = None,
     ) -> int:
         """
         Executes an application through its optimal compatibility pipeline.
@@ -651,5 +658,6 @@ class ExecutionOrchestrator:
             auto_install=auto_install,
             timeout=timeout,
             allow_network=allow_network,
+            tuning=tuning,
         )
         return result.exit_code

@@ -23,11 +23,14 @@ from zcf.diagnostics.remediator import AutomatedRemediator
 from zcf.environment.inspector import EnvironmentInspector
 from zcf.execution.installer import PackageInstallerBridge
 from zcf.execution.runner import ExecutionOrchestrator
+from zcf.execution.tuning import GamingTuningConfig
 from zcf.gui.theme import DARK_THEME
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
 from zcf.runtimes.components import WindowsComponentManager
 from zcf.runtimes.prefix_manager import WinePrefixManager
+from zcf.runtimes.snapshots import PrefixSnapshotManager
+from zcf.runtimes.tasks import PrefixTaskManager
 
 
 class ZCFControlCenter:
@@ -299,6 +302,48 @@ class ZCFControlCenter:
         )
         chk_network.pack(anchor="w")
 
+        self.var_gamemode = tk.BooleanVar(value=True)
+        chk_gamemode = tk.Checkbutton(
+            opt_box,
+            text="Feral GameMode Booster (gamemoderun priority optimization)",
+            variable=self.var_gamemode,
+            bg=DARK_THEME["card_bg"],
+            fg=DARK_THEME["fg"],
+            selectcolor=DARK_THEME["bg"],
+            activebackground=DARK_THEME["card_bg"],
+            activeforeground=DARK_THEME["fg"],
+            font=("Segoe UI", 9),
+        )
+        chk_gamemode.pack(anchor="w")
+
+        self.var_gamescope = tk.BooleanVar(value=False)
+        chk_gamescope = tk.Checkbutton(
+            opt_box,
+            text="Gamescope Micro-Compositor & AMD FSR Spatial Upscaling",
+            variable=self.var_gamescope,
+            bg=DARK_THEME["card_bg"],
+            fg=DARK_THEME["fg"],
+            selectcolor=DARK_THEME["bg"],
+            activebackground=DARK_THEME["card_bg"],
+            activeforeground=DARK_THEME["fg"],
+            font=("Segoe UI", 9),
+        )
+        chk_gamescope.pack(anchor="w")
+
+        self.var_mangohud = tk.BooleanVar(value=False)
+        chk_mangohud = tk.Checkbutton(
+            opt_box,
+            text="MangoHud Real-Time FPS & Hardware Telemetry Overlay",
+            variable=self.var_mangohud,
+            bg=DARK_THEME["card_bg"],
+            fg=DARK_THEME["fg"],
+            selectcolor=DARK_THEME["bg"],
+            activebackground=DARK_THEME["card_bg"],
+            activeforeground=DARK_THEME["fg"],
+            font=("Segoe UI", 9),
+        )
+        chk_mangohud.pack(anchor="w")
+
         # Action Buttons
         btn_box = ttk.Frame(card, style="Card.TFrame")
         btn_box.pack(fill="x", pady=(15, 0))
@@ -372,9 +417,18 @@ class ZCFControlCenter:
         use_sandbox = self.var_sandbox.get()
         force_headless = self.var_headless.get()
         allow_network = self.var_network.get()
+        use_gamemode = self.var_gamemode.get()
+        use_gamescope = self.var_gamescope.get()
+        use_mangohud = self.var_mangohud.get()
 
         def run_worker():
             orchestrator = ExecutionOrchestrator()
+            tuning = GamingTuningConfig(
+                enabled=use_gamemode or use_gamescope or use_mangohud,
+                use_gamemode=use_gamemode,
+                use_gamescope=use_gamescope,
+                use_mangohud=use_mangohud,
+            )
             try:
                 orchestrator.run(
                     artifact_path=path,
@@ -382,6 +436,7 @@ class ZCFControlCenter:
                     force_headless=force_headless,
                     allow_network=allow_network,
                     auto_install=True,
+                    tuning=tuning,
                 )
             except Exception as ex:
                 self.root.after(0, lambda: self._show_error("Execution Error", str(ex)))
@@ -669,7 +724,78 @@ class ZCFControlCenter:
         )
         btn_open.pack(side="left")
 
+        btn_snap = ttk.Button(
+            btn_box,
+            text="📸 Take Snapshot",
+            style="Secondary.TButton",
+            command=self._on_take_snapshot,
+        )
+        btn_snap.pack(side="left", padx=(10, 0))
+
+        btn_winecfg = ttk.Button(
+            btn_box,
+            text="⚙️ winecfg",
+            style="Secondary.TButton",
+            command=self._on_launch_winecfg,
+        )
+        btn_winecfg.pack(side="left", padx=(10, 0))
+
+        btn_kill = ttk.Button(
+            btn_box,
+            text="🛑 Kill wineserver",
+            style="Secondary.TButton",
+            command=self._on_kill_wineserver,
+        )
+        btn_kill.pack(side="left", padx=(10, 0))
+
         self._refresh_prefix_stats()
+
+    def _get_selected_prefix_path(self) -> Optional[str]:
+        selection = self.tree_prefixes.selection()
+        if not selection:
+            return None
+        item = self.tree_prefixes.item(selection[0])
+        values = item.get("values", [])
+        if len(values) >= 7:
+            return values[6]
+        return None
+
+    def _on_take_snapshot(self):
+        p_path = self._get_selected_prefix_path()
+        if not p_path:
+            self._show_warning("Select Prefix", "Please select a prefix from the list above first.")
+            return
+        snap_mgr = PrefixSnapshotManager()
+        try:
+            snap = snap_mgr.create_snapshot(p_path, label="GUI Snapshot")
+            self._show_info("Snapshot Created", f"Successfully created restore point '{snap.id}' ({snap.label}).")
+        except Exception as e:
+            self._show_error("Snapshot Failed", str(e))
+
+    def _on_launch_winecfg(self):
+        p_path = self._get_selected_prefix_path()
+        if not p_path:
+            self._show_warning("Select Prefix", "Please select a prefix from the list above first.")
+            return
+        tm = PrefixTaskManager()
+        try:
+            tm.launch_wine_tool(p_path, "winecfg")
+            self._show_info("Launched", f"Launched winecfg configuration dialog for:\n{p_path}")
+        except Exception as e:
+            self._show_error("Launch Failed", str(e))
+
+    def _on_kill_wineserver(self):
+        p_path = self._get_selected_prefix_path()
+        if not p_path:
+            self._show_warning("Select Prefix", "Please select a prefix from the list above first.")
+            return
+        tm = PrefixTaskManager()
+        try:
+            res = tm.kill_prefix_processes(p_path)
+            self._show_info("Wineserver Terminated", f"Processes terminated for prefix:\nKilled PIDs: {res.get('killed_pids', [])}")
+            self._refresh_prefix_stats()
+        except Exception as e:
+            self._show_error("Kill Failed", str(e))
 
     def _refresh_prefix_stats(self):
         wine_prefixes = self.prefix_mgr.list_prefixes()

@@ -406,6 +406,80 @@ class TestWebConsole(unittest.TestCase):
         self.assertIn("pipeline-topology-card", html_str)
         self.assertIn("prefix-surgery-card", html_str)
         self.assertIn("log-filter-bar", html_str)
+        self.assertIn("tab-tuning", html_str)
+        self.assertIn("tab-runners", html_str)
+        self.assertIn("tab-vault", html_str)
+        self.assertIn("healing-rx-card", html_str)
+
+    def test_api_tuning_tools_and_presets(self):
+        """Verifies GET /api/tuning/tools returns accelerator binary status and esports presets."""
+        status, _, body = self._http_get("/api/tuning/tools")
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertIn("tools", data)
+        self.assertIn("presets", data)
+        self.assertIn("gamescope", data["tools"])
+        self.assertIn("esports", data["presets"])
+        self.assertEqual(data["presets"]["esports"]["fps_limit"], 144)
+
+    def test_api_tuning_preview(self):
+        """Verifies POST /api/tuning/preview generates full wrapped command pipeline."""
+        payload = {
+            "tuning": {"enabled": True, "use_gamemode": True, "use_gamescope": True, "upscaling_filter": "fsr"},
+            "command": ["wine", "test.exe"],
+        }
+        status, _, body = self._http_post("/api/tuning/preview", payload)
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertIn("command", data)
+        cmd = data["command"]
+        self.assertEqual(cmd[0], "gamemoderun")
+        self.assertEqual(cmd[1], "gamescope")
+
+    def test_api_runners_and_available(self):
+        """Verifies GET /api/runners and GET /api/runners/available."""
+        status, _, body = self._http_get("/api/runners")
+        self.assertEqual(status, 200)
+        runners = json.loads(body.decode("utf-8"))
+        self.assertIsInstance(runners, list)
+
+        status, _, body = self._http_get("/api/runners/available?limit=3")
+        self.assertEqual(status, 200)
+        available = json.loads(body.decode("utf-8"))
+        self.assertIsInstance(available, list)
+        self.assertGreaterEqual(len(available), 1)
+
+    def test_api_snapshots_lifecycle(self):
+        """Verifies Time-Machine snapshots creation and listing via REST API."""
+        with tempfile.TemporaryDirectory() as temp_prefix:
+            with open(os.path.join(temp_prefix, "system.reg"), "w") as f:
+                f.write("[Software\\\\Wine]\n")
+
+            # Create snapshot
+            status, _, body = self._http_post(
+                "/api/snapshots/create",
+                {"prefix_path": temp_prefix, "label": "Web Test Snap"},
+            )
+            self.assertEqual(status, 200)
+            data = json.loads(body.decode("utf-8"))
+            self.assertTrue(data.get("success"))
+            snap_id = data["snapshot"]["id"]
+
+            # List snapshots
+            status, _, list_body = self._http_get(f"/api/snapshots?prefix_path={urllib.request.quote(temp_prefix)}")
+            self.assertEqual(status, 200)
+            snaps = json.loads(list_body.decode("utf-8"))
+            self.assertEqual(len(snaps), 1)
+            self.assertEqual(snaps[0]["id"], snap_id)
+
+    def test_api_prescriptions_generate(self):
+        """Verifies POST /api/prescriptions/generate synthesizes actionable prescription."""
+        log = "err:module:import_dll Library d3dx9_43.dll not found\nerror loading d3dcompiler_47.dll"
+        status, _, body = self._http_post("/api/prescriptions/generate", {"log": log, "app_name": "game.exe"})
+        self.assertEqual(status, 200)
+        rx = json.loads(body.decode("utf-8"))
+        self.assertIn("d3dcompiler_47", rx.get("components_to_install", []))
+        self.assertEqual(rx.get("recommended_runner"), "runtime.proton")
 
 
 if __name__ == "__main__":

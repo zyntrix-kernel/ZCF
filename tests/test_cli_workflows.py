@@ -212,6 +212,73 @@ class TestCLIWorkflows(unittest.TestCase):
                 main(["history", "--clear"])
             self.assertIn("Cleared 1 execution run log(s)", buf.getvalue())
 
+    def test_cli_runners_workflows(self):
+        """Verifies 'zcf runners list' and 'zcf runners available' commands."""
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["runners", "list"])
+        self.assertIn("Discovered Compatibility Runners", buf.getvalue())
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["runners", "available", "--limit", "2"])
+        self.assertIn("Available Upstream Runners", buf.getvalue())
+
+    def test_cli_snapshot_workflows(self):
+        """Verifies 'zcf snapshot create' and 'zcf snapshot list' commands."""
+        prefix = os.path.join(self.test_dir, "snap_prefix")
+        os.makedirs(prefix, exist_ok=True)
+        with open(os.path.join(prefix, "system.reg"), "w") as f:
+            f.write("[Software\\\\Wine]\n")
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["snapshot", "create", prefix, "--label", "Test CLI Snap"])
+        self.assertIn("Successfully created snapshot", buf.getvalue())
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["snapshot", "list", prefix])
+        self.assertIn("Time-Machine Snapshots for", buf.getvalue())
+        self.assertIn("Test CLI Snap", buf.getvalue())
+
+    def test_cli_vault_workflows(self):
+        """Verifies 'zcf vault list' command."""
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["vault", "list"])
+        self.assertIn("Save Game Vault Backups", buf.getvalue())
+
+    def test_cli_taskmgr_workflows(self):
+        """Verifies 'zcf taskmgr list' and 'zcf taskmgr reset-locks' commands."""
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["taskmgr", "list"])
+        self.assertIn("Active Prefix Processes", buf.getvalue())
+
+        prefix = os.path.join(self.test_dir, "lock_prefix")
+        os.makedirs(prefix, exist_ok=True)
+        with open(os.path.join(prefix, ".update-timestamp"), "w") as f:
+            f.write("test")
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["taskmgr", "reset-locks", prefix])
+        self.assertIn("Cleared 1 locks", buf.getvalue())
+
+    def test_cli_prescribe_workflows(self):
+        """Verifies 'zcf prescribe generate' command."""
+        log_file = os.path.join(self.test_dir, "crash.log")
+        with open(log_file, "w") as f:
+            f.write("err:module:import_dll Library d3dx9_43.dll not found\n")
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["prescribe", "generate", log_file, "--app", "Doom.exe"])
+        out = buf.getvalue()
+        self.assertIn("Autonomous Healing Prescription", out)
+        self.assertIn("d3dx9", out)
+
 
 if __name__ == "__main__":
     unittest.main()

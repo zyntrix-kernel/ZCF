@@ -24,8 +24,23 @@ Launches the secure loopback browser-based Web Console and REST API. (Alias: \fB
 .B gui
 Launches the standalone graphical Control Center for desktop application and prefix management.
 .TP
-.B run \fIPATH\fR [\fIARGS\fR...]
-Executes an application through its optimal planned runtime, ensuring prefix isolation, sandboxing, and automated crash diagnostics.
+.B run \fIPATH\fR [\fIARGS\fR...] [\fB\-\-gamemode\fR] [\fB\-\-gamescope\fR] [\fB\-\-upscale\fR \fIFILTER\fR] [\fB\-\-fsr-sharpness\fR \fINUM\fR] [\fB\-\-fps-limit\fR \fIFPS\fR] [\fB\-\-mangohud\fR] [\fB\-\-tuning-preset\fR \fIPRESET\fR]
+Executes an application through its optimal planned runtime, ensuring prefix isolation, sandboxing, automated crash diagnostics, and optional esports/gaming acceleration wrappers (Gamescope, AMD FSR, Feral GameMode, MangoHud).
+.TP
+.B runners \fIaction\fR [\fIOPTIONS\fR]
+Discovers installed local compatibility runners across Steam, Lutris, Bottles, and ~/.zcf/runners/ (\fBlist\fR), queries available upstream GE-Proton releases (\fBavailable\fR), and installs custom runners with cryptographic SHA-512 verification (\fBinstall\fR).
+.TP
+.B snapshot \fIaction\fR \fIPREFIX_PATH\fR [\fIOPTIONS\fR]
+Manages Time-Machine restore points and zero-loss differential prefix rollbacks (\fBcreate\fR, \fBlist\fR, \fBrestore\fR, \fBdelete\fR).
+.TP
+.B vault \fIaction\fR [\fIOPTIONS\fR]
+Universal Game Save Vault for automated save data discovery in prefix user profiles (\fBdiscover\fR), compressed archiving with SHA-256 integrity (\fBbackup\fR), backup querying (\fBlist\fR), safe prefix migration (\fBrestore\fR), and pruning (\fBdelete\fR).
+.TP
+.B taskmgr \fIaction\fR [\fIPREFIX_PATH\fR] [\fITOOL\fR]
+Inspects active prefix process trees with memory RSS telemetry (\fBlist\fR), performs targeted wineserver termination (\fBkill\fR), clears stale lock files (\fBreset-locks\fR), and launches built-in Wine management tools such as winecfg, regedit, taskmgr, and control (\fBlaunch\fR).
+.TP
+.B prescribe \fIaction\fR \fILOG_PATH\fR [\fB\-\-prefix\fR \fIPATH\fR] [\fB\-\-app\fR \fINAME\fR] [\fB\-\-dry-run\fR]
+Autonomous healing prescription engine. Analyzes execution crashes and failure logs to synthesize actionable remediations (\fBgenerate\fR) and applies the fix automatically with a pre-repair safety snapshot, component installation, and DLL overrides (\fBapply\fR).
 .TP
 .B integrate \fIPATH\fR [\fB\-\-name\fR \fINAME\fR] [\fB\-\-list\fR] [\fB\-\-remove\fR]
 Manages Freedesktop application menu launchers with proper Exec escaping and reversible unintegration.

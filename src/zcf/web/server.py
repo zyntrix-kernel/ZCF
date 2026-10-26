@@ -15,6 +15,7 @@ import re
 import sys
 import threading
 import urllib.parse
+import urllib.request
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,14 +24,25 @@ from typing import Any, Dict, List, Optional
 from zcf import __version__
 from zcf.compatibility_db.database import CompatibilityDatabase
 from zcf.diagnostics.analyzer import DiagnosticEngine
+from zcf.diagnostics.prescriptions import PrescriptionEngine
 from zcf.diagnostics.remediator import AutomatedRemediator
 from zcf.environment.inspector import EnvironmentInspector
 from zcf.execution.history import ExecutionHistoryManager
+from zcf.execution.tuning import (
+    GamingTuningConfig,
+    build_tuning_pipeline,
+    check_tuning_tools_availability,
+    get_tuning_preset,
+)
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
 from zcf.runtimes.components import WindowsComponentManager
+from zcf.runtimes.fleet import RunnerFleetManager
 from zcf.runtimes.prefix_manager import WinePrefixManager
 from zcf.runtimes.registry import RuntimeRegistry
+from zcf.runtimes.snapshots import PrefixSnapshotManager
+from zcf.runtimes.tasks import PrefixTaskManager
+from zcf.runtimes.vault import GameSaveVault
 from zcf.security.controller import SecurityController
 
 
@@ -389,11 +401,14 @@ def get_web_dashboard_html() -> str:
 
   <nav>
     <button class="nav-btn active" onclick="switchTab('dashboard', event)">System Health</button>
+    <button class="nav-btn" onclick="switchTab('tuning', event)">Gaming & Tuning</button>
+    <button class="nav-btn" onclick="switchTab('runners', event)">Runner Fleet</button>
     <button class="nav-btn" onclick="switchTab('inspector', event)">Binary Inspector & Plan</button>
     <button class="nav-btn" onclick="switchTab('test', event)">Execution Test Runner</button>
     <button class="nav-btn" onclick="switchTab('history', event)">Execution History</button>
     <button class="nav-btn" onclick="switchTab('database', event)">Compatibility Knowledge Base</button>
-    <button class="nav-btn" onclick="switchTab('prefixes', event)">Isolated Storage</button>
+    <button class="nav-btn" onclick="switchTab('prefixes', event)">Isolated Storage & Tools</button>
+    <button class="nav-btn" onclick="switchTab('vault', event)">Save Game Vault</button>
     <button class="nav-btn" onclick="switchTab('diagnostics', event)">Crash Troubleshooter</button>
   </nav>
 
@@ -493,6 +508,197 @@ def get_web_dashboard_html() -> str:
             <p style="margin-top: 6px;"><strong>Kernel Release:</strong> <span id="env-kernel">-</span></p>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- TAB: GAMING & TUNING -->
+    <section id="tab-tuning" class="tab-content">
+      <div class="card" style="border-left: 4px solid var(--accent-green);">
+        <div class="card-title">
+          <span>Esports & Gaming Performance Accelerators</span>
+          <span class="badge badge-green" id="tuning-status-badge">Gaming Pipeline Active</span>
+        </div>
+        <p style="color: var(--fg-subtle); margin-bottom: 16px; font-size: 13px;">
+          Hardware-accelerated execution wrapper combining Gamescope nested micro-compositor, AMD FSR / NIS spatial upscaling, Feral GameMode governor boosting, and MangoHud frame telemetry.
+        </p>
+
+        <!-- Presets -->
+        <div style="margin-bottom: 20px;">
+          <label style="font-weight: 700; font-size: 13px; margin-bottom: 6px; display: block;">Quick Performance Profiles:</label>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-sm" onclick="applyTuningPreset('esports')">Esports Competitive (144Hz FSR)</button>
+            <button class="btn btn-secondary btn-sm" onclick="applyTuningPreset('4k_fidelity')">4K Fidelity Upscale</button>
+            <button class="btn btn-secondary btn-sm" onclick="applyTuningPreset('power_saver')">Power Saver (60Hz)</button>
+            <button class="btn btn-secondary btn-sm" onclick="applyTuningPreset('minimal_overlay')">Minimal HUD Only</button>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <!-- Left Column: Micro-Compositor & Upscaling -->
+          <div style="background: rgba(255,255,255,0.02); padding: 16px; border-radius: 6px; border: 1px solid var(--card-border);">
+            <div style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--primary);">
+              Gamescope Micro-Compositor & Upscaling
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+              <input type="checkbox" id="tune-gamescope" checked onchange="updateTuningPreview()">
+              <label for="tune-gamescope" style="margin: 0; font-weight: 600;">Enable Gamescope Nested Compositor</label>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+              <div>
+                <label style="font-size: 12px; color: var(--fg-subtle);">Internal Render Res:</label>
+                <select id="tune-render-res" onchange="updateTuningPreview()" style="margin-top: 4px; padding: 6px 8px; font-size: 13px;">
+                  <option value="1280x720">1280 x 720 (720p)</option>
+                  <option value="1920x1080" selected>1920 x 1080 (1080p)</option>
+                  <option value="2560x1440">2560 x 1440 (1440p)</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 12px; color: var(--fg-subtle);">Display Output Res:</label>
+                <select id="tune-output-res" onchange="updateTuningPreview()" style="margin-top: 4px; padding: 6px 8px; font-size: 13px;">
+                  <option value="1920x1080" selected>1920 x 1080 (1080p)</option>
+                  <option value="2560x1440">2560 x 1440 (1440p)</option>
+                  <option value="3840x2160">3840 x 2160 (4K UHD)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+              <div>
+                <label style="font-size: 12px; color: var(--fg-subtle);">Spatial Filter:</label>
+                <select id="tune-upscale" onchange="updateTuningPreview()" style="margin-top: 4px; padding: 6px 8px; font-size: 13px;">
+                  <option value="fsr" selected>AMD FSR (FidelityFX)</option>
+                  <option value="nis">NVIDIA Image Scaling (NIS)</option>
+                  <option value="pixel">Integer Pixel Scaling</option>
+                  <option value="linear">Bilinear Filtering</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 12px; color: var(--fg-subtle);">FSR Sharpness (0-10):</label>
+                <input type="number" id="tune-sharpness" min="0" max="10" value="5" onchange="updateTuningPreview()" style="margin-top: 4px; padding: 6px 8px; font-size: 13px;">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label style="font-size: 12px; color: var(--fg-subtle);">FPS Cap / Refresh Rate:</label>
+                <select id="tune-fps" onchange="updateTuningPreview()" style="margin-top: 4px; padding: 6px 8px; font-size: 13px;">
+                  <option value="0">Unlimited (Display Max)</option>
+                  <option value="60">60 FPS (V-Sync Standard)</option>
+                  <option value="120">120 FPS</option>
+                  <option value="144" selected>144 FPS (Esports)</option>
+                  <option value="240">240 FPS</option>
+                </select>
+              </div>
+              <div style="display: flex; flex-direction: column; justify-content: center; margin-top: 14px;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 0;">
+                  <input type="checkbox" id="tune-fullscreen" checked onchange="updateTuningPreview()"> Fullscreen Display
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: GameMode, MangoHud & Audio -->
+          <div style="background: rgba(255,255,255,0.02); padding: 16px; border-radius: 6px; border: 1px solid var(--card-border);">
+            <div style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--primary);">
+              System Prioritization & Telemetry
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+              <input type="checkbox" id="tune-gamemode" checked onchange="updateTuningPreview()">
+              <div>
+                <label for="tune-gamemode" style="margin: 0; font-weight: 600;">Feral GameMode (gamemoderun)</label>
+                <p style="font-size: 11px; color: var(--fg-subtle); margin-top: 2px;">Boosts CPU governor to performance, elevates process scheduling priority and GPU power states.</p>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+              <input type="checkbox" id="tune-mangohud" checked onchange="updateTuningPreview()">
+              <div>
+                <label for="tune-mangohud" style="margin: 0; font-weight: 600;">MangoHud Real-Time Overlay</label>
+                <p style="font-size: 11px; color: var(--fg-subtle); margin-top: 2px;">Injected via --mangoapp inside Gamescope or MANGOHUD=1 wrapper outside.</p>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 12px; padding-left: 24px;">
+              <label style="font-size: 12px; color: var(--fg-subtle);">MangoHud Preset Layout:</label>
+              <select id="tune-mangohud-preset" onchange="updateTuningPreview()" style="margin-top: 4px; padding: 6px 8px; font-size: 13px;">
+                <option value="fps_only">FPS & Frametime Only (Minimal)</option>
+                <option value="compact" selected>Compact (FPS, Frametime, CPU, GPU, VRAM)</option>
+                <option value="full">Full Extended Diagnostics</option>
+              </select>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <input type="checkbox" id="tune-audio" checked onchange="updateTuningPreview()">
+              <div>
+                <label for="tune-audio" style="margin: 0; font-weight: 600;">Low-Latency Audio Fast-Path</label>
+                <p style="font-size: 11px; color: var(--fg-subtle); margin-top: 2px;">Configures PIPEWIRE_LATENCY="128/48000" and PULSE_LATENCY_MSEC=15 for zero-lag spatial sound.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Command Preview Box -->
+        <div style="margin-top: 20px;">
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 6px; display: flex; justify-content: space-between;">
+            <span>Generated Acceleration Execution Pipeline:</span>
+            <span style="color: var(--primary); font-size: 12px; cursor: pointer;" onclick="navigator.clipboard.writeText(document.getElementById('tuning-cmd-preview').innerText); showAlert('Copied command pipeline to clipboard!', false);">Copy Pipeline Command</span>
+          </div>
+          <pre id="tuning-cmd-preview" style="background: var(--code-bg); padding: 14px; border-radius: 6px; font-size: 12px; color: var(--accent-green); overflow-x: auto;">gamemoderun gamescope -w 1920 -h 1080 -W 1920 -H 1080 -F fsr -S 5 -U -r 144 -f --mangoapp -- bwrap ... wine app.exe</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: RUNNER FLEET -->
+    <section id="tab-runners" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Compatibility Runner Fleet & ProtonUp Manager</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadRunners()">Refresh Runners</button>
+        </div>
+        <p style="color: var(--fg-subtle); font-size: 13px; margin-bottom: 16px;">
+          Discovers installed Proton and Wine runners across Steam, Lutris, Bottles, and ~/.zcf/runners/, and provides automated installation for upstream GE-Proton releases with cryptographic verification.
+        </p>
+
+        <!-- Installed Runners Table -->
+        <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">Installed Compatibility Runners</div>
+        <table style="margin-bottom: 24px;">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Runner Name</th>
+              <th>Type</th>
+              <th>Version</th>
+              <th>Capabilities</th>
+              <th>Filesystem Path</th>
+            </tr>
+          </thead>
+          <tbody id="runners-local-body">
+            <tr><td colspan="6" style="color: var(--fg-subtle);">Scanning local runners...</td></tr>
+          </tbody>
+        </table>
+
+        <!-- Available Upstream Releases -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="font-size: 14px; font-weight: 700;">Upstream Custom Releases (GE-Proton Feed)</div>
+          <button class="btn btn-secondary btn-sm" onclick="loadAvailableRunners()">Check for Updates</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Release Tag</th>
+              <th>Size</th>
+              <th>Published</th>
+              <th>Integrity</th>
+              <th style="width: 140px;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="runners-remote-body">
+            <tr><td colspan="5" style="color: var(--fg-subtle);">Click "Check for Updates" to fetch available GE-Proton releases...</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -739,6 +945,115 @@ def get_web_dashboard_html() -> str:
             </table>
           </div>
         </div>
+
+        <!-- TIME-MACHINE SNAPSHOTS -->
+        <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--card-border);">
+          <div style="font-size: 15px; font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <span>Prefix Time-Machine & Rollback Points</span>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="snapshot-label-input" placeholder="Snapshot label (e.g. Pre-Patch v1.2)" style="margin: 0; padding: 6px 10px; font-size: 13px;">
+              <button class="btn btn-sm" onclick="createPrefixSnapshot()">Take Snapshot</button>
+            </div>
+          </div>
+          <p style="color: var(--fg-subtle); font-size: 12px; margin-bottom: 12px;">
+            Captures atomic registry hives, system configuration, and DLL states for instant zero-loss rollbacks.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Snapshot ID</th>
+                <th>Label</th>
+                <th>Trigger</th>
+                <th>Created</th>
+                <th>Size</th>
+                <th style="width: 140px;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="surgery-snapshots-body">
+              <tr><td colspan="6" style="color: var(--fg-subtle);">Select a prefix to load Time-Machine restore points.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- PROCESS MONITOR & SYSTEM TOOLS -->
+        <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--card-border);">
+          <div style="font-size: 15px; font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <span>Prefix Process Task Manager & Wine Utilities</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" onclick="refreshPrefixProcesses()">Refresh Processes</button>
+              <button class="btn btn-sm btn-error" onclick="killPrefixProcesses()">Kill wineserver (-k)</button>
+              <button class="btn btn-secondary btn-sm" onclick="resetPrefixLocks()">Reset Locks</button>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;">
+            <button class="btn btn-secondary btn-sm" onclick="launchWineUtility('winecfg')">Launch winecfg</button>
+            <button class="btn btn-secondary btn-sm" onclick="launchWineUtility('regedit')">Launch regedit</button>
+            <button class="btn btn-secondary btn-sm" onclick="launchWineUtility('taskmgr')">Launch taskmgr</button>
+            <button class="btn btn-secondary btn-sm" onclick="launchWineUtility('control')">Launch control</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>PID</th>
+                <th>Process Name</th>
+                <th>Memory (RSS)</th>
+                <th>Command Line</th>
+              </tr>
+            </thead>
+            <tbody id="surgery-processes-body">
+              <tr><td colspan="4" style="color: var(--fg-subtle);">No active processes detected in this prefix.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB: SAVE GAME VAULT -->
+    <section id="tab-vault" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Universal Game Save Vault</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadVaultBackups()">Refresh Vault</button>
+        </div>
+        <p style="color: var(--fg-subtle); font-size: 13px; margin-bottom: 16px;">
+          Automatically discovers save directories across Windows user profiles in Wine/Proton prefixes, stores compressed archives with SHA-256 integrity, and allows safe prefix resets and cross-runner save migration.
+        </p>
+
+        <!-- Discovery & Backup -->
+        <div class="grid-2" style="margin-bottom: 24px;">
+          <div style="background: rgba(255,255,255,0.02); padding: 16px; border-radius: 6px; border: 1px solid var(--card-border);">
+            <div style="font-size: 14px; font-weight: 700; margin-bottom: 10px;">Discover & Backup Prefix Saves</div>
+            <label style="font-size: 12px; color: var(--fg-subtle);">Source Prefix Path:</label>
+            <input type="text" id="vault-prefix-input" placeholder="/path/to/prefix or select above" style="margin-top: 4px; padding: 7px 10px; font-size: 13px;">
+            <label style="font-size: 12px; color: var(--fg-subtle); margin-top: 8px; display: block;">Game / App Name Filter:</label>
+            <input type="text" id="vault-app-input" placeholder="e.g. EldenRing or Cyberpunk2077" style="margin-top: 4px; padding: 7px 10px; font-size: 13px;">
+            <div style="display: flex; gap: 8px; margin-top: 12px;">
+              <button class="btn btn-secondary btn-sm" onclick="discoverPrefixSaves()">Scan for Saves</button>
+              <button class="btn btn-sm" onclick="backupPrefixSaves()">Backup to Vault</button>
+            </div>
+            <div id="vault-discovery-results" style="margin-top: 12px; font-size: 12px; color: var(--fg-subtle);"></div>
+          </div>
+
+          <!-- Stored Backups -->
+          <div>
+            <div style="font-size: 14px; font-weight: 700; margin-bottom: 10px;">Vault Save Backups</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Vault ID</th>
+                  <th>Game Name</th>
+                  <th>Size</th>
+                  <th>Archived</th>
+                  <th style="width: 140px;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="vault-backups-body">
+                <tr><td colspan="5" style="color: var(--fg-subtle);">Loading archived saves...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -748,7 +1063,24 @@ def get_web_dashboard_html() -> str:
         <div class="card-title">Automated Crash Troubleshooter & Root-Cause Remediation</div>
         <p style="color: var(--fg-subtle); margin-bottom: 10px;">Paste runtime stderr, Wine logs, or dynamic loader errors below for automated failure signature classification and package install instructions:</p>
         <textarea id="diag-log" rows="6" placeholder="err:module:import_dll Library D3DX9_43.dll not found&#10;error while loading shared libraries: libvulkan.so.1: cannot open shared object file"></textarea>
-        <button class="btn" onclick="analyzeLog()">Diagnose Failure Signatures</button>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+          <button class="btn" onclick="analyzeLog()">Diagnose Failure Signatures</button>
+          <button class="btn btn-secondary" onclick="generateHealingPrescription()">Synthesize Healing Prescription</button>
+        </div>
+      </div>
+
+      <!-- HEALING PRESCRIPTION CARD -->
+      <div class="card" id="healing-rx-card" style="display: none; border-left: 4px solid var(--accent-green);">
+        <div class="card-title">
+          <span>Autonomous Healing Prescription</span>
+          <span class="badge badge-green" id="rx-status-badge">Prescription Synthesized</span>
+        </div>
+        <div id="rx-content" style="margin-bottom: 16px; font-size: 13px;"></div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="text" id="rx-prefix-input" placeholder="Target prefix path to apply fix" style="flex: 2; margin: 0; padding: 7px 10px; font-size: 13px;">
+          <button class="btn btn-sm" onclick="applyHealingPrescription(false)">Apply Prescription & Auto-Heal</button>
+          <button class="btn btn-secondary btn-sm" onclick="applyHealingPrescription(true)">Dry-Run Simulation</button>
+        </div>
       </div>
 
       <div class="card" id="diag-result-card" style="display: none;">
@@ -1429,7 +1761,12 @@ def get_web_dashboard_html() -> str:
       document.getElementById('prefix-surgery-card').style.display = 'block';
       document.getElementById('prefix-surgery-card').scrollIntoView({{ behavior: 'smooth' }});
 
-      await Promise.all([refreshPrefixComponents(), refreshPrefixOverrides()]);
+      await Promise.all([
+        refreshPrefixComponents(),
+        refreshPrefixOverrides(),
+        refreshPrefixSnapshots(),
+        refreshPrefixProcesses()
+      ]);
     }}
 
     async function refreshPrefixComponents() {{
@@ -1634,7 +1971,505 @@ def get_web_dashboard_html() -> str:
       }}
     }}
 
-    window.addEventListener('DOMContentLoaded', loadTelemetry);
+    function applyTuningPreset(presetName) {{
+      if (presetName === 'esports') {{
+        document.getElementById('tune-gamescope').checked = true;
+        document.getElementById('tune-render-res').value = '1920x1080';
+        document.getElementById('tune-output-res').value = '1920x1080';
+        document.getElementById('tune-upscale').value = 'fsr';
+        document.getElementById('tune-sharpness').value = 5;
+        document.getElementById('tune-fps').value = '144';
+        document.getElementById('tune-gamemode').checked = true;
+        document.getElementById('tune-mangohud').checked = true;
+        document.getElementById('tune-mangohud-preset').value = 'compact';
+      }} else if (presetName === '4k_fidelity') {{
+        document.getElementById('tune-gamescope').checked = true;
+        document.getElementById('tune-render-res').value = '1920x1080';
+        document.getElementById('tune-output-res').value = '3840x2160';
+        document.getElementById('tune-upscale').value = 'fsr';
+        document.getElementById('tune-sharpness').value = 7;
+        document.getElementById('tune-fps').value = '0';
+        document.getElementById('tune-gamemode').checked = true;
+        document.getElementById('tune-mangohud').checked = false;
+      }} else if (presetName === 'power_saver') {{
+        document.getElementById('tune-gamescope').checked = true;
+        document.getElementById('tune-render-res').value = '1280x720';
+        document.getElementById('tune-output-res').value = '1920x1080';
+        document.getElementById('tune-upscale').value = 'fsr';
+        document.getElementById('tune-sharpness').value = 4;
+        document.getElementById('tune-fps').value = '60';
+        document.getElementById('tune-gamemode').checked = false;
+        document.getElementById('tune-mangohud').checked = false;
+      }} else if (presetName === 'minimal_overlay') {{
+        document.getElementById('tune-gamescope').checked = false;
+        document.getElementById('tune-gamemode').checked = false;
+        document.getElementById('tune-mangohud').checked = true;
+        document.getElementById('tune-mangohud-preset').value = 'fps_only';
+      }}
+      updateTuningPreview();
+      showAlert('Applied ' + presetName + ' tuning profile', false);
+    }}
+
+    async function updateTuningPreview() {{
+      const gs = document.getElementById('tune-gamescope').checked;
+      const gm = document.getElementById('tune-gamemode').checked;
+      const mh = document.getElementById('tune-mangohud').checked;
+      const [rw, rh] = document.getElementById('tune-render-res').value.split('x').map(Number);
+      const [ow, oh] = document.getElementById('tune-output-res').value.split('x').map(Number);
+      const up = document.getElementById('tune-upscale').value;
+      const sh = Number(document.getElementById('tune-sharpness').value);
+      const fps = Number(document.getElementById('tune-fps').value);
+      const fs = document.getElementById('tune-fullscreen').checked;
+      const mPreset = document.getElementById('tune-mangohud-preset').value;
+
+      const tuningObj = {{
+        enabled: gs || gm || mh,
+        use_gamescope: gs,
+        use_gamemode: gm,
+        use_mangohud: mh,
+        gamescope_render_res: [rw, rh],
+        gamescope_output_res: [ow, oh],
+        upscaling_filter: up,
+        fsr_sharpness: sh,
+        fps_limit: fps > 0 ? fps : null,
+        fullscreen: fs,
+        mangohud_preset: mPreset
+      }};
+
+      try {{
+        const res = await fetch('/api/tuning/preview', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ tuning: tuningObj, command: ['bwrap', '...', 'wine', 'app.exe'] }})
+        }});
+        if (res.ok) {{
+          const data = await res.json();
+          document.getElementById('tuning-cmd-preview').textContent = data.command.join(' ');
+        }}
+      }} catch (e) {{
+        console.error('Preview error', e);
+      }}
+    }}
+
+    async function loadRunners() {{
+      try {{
+        const res = await fetch('/api/runners');
+        if (!res.ok) throw new Error('Failed to load local runners');
+        const runners = await res.json();
+        const tbody = document.getElementById('runners-local-body');
+        tbody.innerHTML = '';
+        if (!runners.length) {{
+          tbody.innerHTML = '<tr><td colspan="6" style="color: var(--fg-subtle);">No runners found.</td></tr>';
+          return;
+        }}
+        runners.forEach(r => {{
+          const row = document.createElement('tr');
+          const isSys = r.is_system;
+          row.innerHTML =
+            '<td><span class="badge ' + (isSys ? 'badge-amber' : 'badge-green') + '">' + (isSys ? 'SYSTEM' : 'CUSTOM') + '</span></td>' +
+            '<td><strong>' + escapeHtml(r.name) + '</strong></td>' +
+            '<td>' + escapeHtml(r.runner_type) + '</td>' +
+            '<td><code>' + escapeHtml(r.version) + '</code></td>' +
+            '<td>' + (r.capabilities || []).map(c => '<span class="badge badge-cyan" style="font-size: 10px; margin-right: 4px;">' + escapeHtml(c) + '</span>').join('') + '</td>' +
+            '<td style="font-size: 11px; color: var(--fg-subtle);">' + escapeHtml(r.path) + '</td>';
+          tbody.appendChild(row);
+        }});
+      }} catch (e) {{
+        showAlert('Error loading runners: ' + e.message, true);
+      }}
+    }}
+
+    async function loadAvailableRunners() {{
+      const tbody = document.getElementById('runners-remote-body');
+      tbody.innerHTML = '<tr><td colspan="5" style="color: var(--fg-subtle);">Fetching latest GE-Proton releases...</td></tr>';
+      try {{
+        const res = await fetch('/api/runners/available');
+        if (!res.ok) throw new Error('Failed to fetch remote releases');
+        const releases = await res.json();
+        tbody.innerHTML = '';
+        releases.forEach(rel => {{
+          const row = document.createElement('tr');
+          const szMb = rel.size_bytes ? (rel.size_bytes / (1024 * 1024)).toFixed(1) + ' MB' : '-';
+          const pubDate = (rel.published_at || '').substring(0, 10);
+          row.innerHTML =
+            '<td><strong>' + escapeHtml(rel.tag_name) + '</strong></td>' +
+            '<td>' + szMb + '</td>' +
+            '<td>' + pubDate + '</td>' +
+            '<td><span class="badge badge-green">SHA-512 Signed</span></td>' +
+            '<td><button class="btn btn-sm" onclick="installRemoteRunner(\'' + escapeHtml(rel.tag_name) + '\', this)">Install Runner</button></td>';
+          tbody.appendChild(row);
+        }});
+      }} catch (e) {{
+        tbody.innerHTML = '<tr><td colspan="5" style="color: var(--accent-red);">Failed to fetch upstream releases: ' + escapeHtml(e.message) + '</td></tr>';
+      }}
+    }}
+
+    async function installRemoteRunner(tagName, btnElem) {{
+      if (btnElem) {{
+        btnElem.disabled = true;
+        btnElem.textContent = 'Installing...';
+      }}
+      try {{
+        const res = await fetch('/api/runners/install', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ archive_or_tag: tagName }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Install failed');
+        showAlert('Runner ' + tagName + ' installed successfully!', false);
+        loadRunners();
+      }} catch (e) {{
+        showAlert('Runner install failed: ' + e.message, true);
+      }} finally {{
+        if (btnElem) {{
+          btnElem.disabled = false;
+          btnElem.textContent = 'Install Runner';
+        }}
+      }}
+    }}
+
+    async function refreshPrefixSnapshots() {{
+      if (!selectedPrefixPath) return;
+      const tbody = document.getElementById('surgery-snapshots-body');
+      tbody.innerHTML = '<tr><td colspan="6" style="color: var(--fg-subtle);">Loading snapshots...</td></tr>';
+      try {{
+        const res = await fetch('/api/snapshots?prefix_path=' + encodeURIComponent(selectedPrefixPath));
+        if (!res.ok) throw new Error('Failed to fetch snapshots');
+        const snaps = await res.json();
+        tbody.innerHTML = '';
+        if (!snaps.length) {{
+          tbody.innerHTML = '<tr><td colspan="6" style="color: var(--fg-subtle);">No restore points created for this prefix.</td></tr>';
+          return;
+        }}
+        snaps.forEach(s => {{
+          const row = document.createElement('tr');
+          const szKb = (s.size_bytes / 1024).toFixed(1) + ' KB';
+          const dt = (s.created_at || '').substring(0, 19).replace('T', ' ');
+          row.innerHTML =
+            '<td><code>' + escapeHtml(s.id) + '</code></td>' +
+            '<td><strong>' + escapeHtml(s.label) + '</strong></td>' +
+            '<td><span class="badge badge-cyan">' + escapeHtml(s.trigger) + '</span></td>' +
+            '<td>' + dt + '</td>' +
+            '<td>' + szKb + '</td>' +
+            '<td>' +
+              '<button class="btn btn-sm btn-secondary" onclick="restorePrefixSnapshot(\'' + escapeHtml(s.id) + '\')">Rollback</button> ' +
+              '<button class="btn btn-sm btn-error" onclick="deletePrefixSnapshot(\'' + escapeHtml(s.id) + '\')">&times;</button>' +
+            '</td>';
+          tbody.appendChild(row);
+        }});
+      }} catch (e) {{
+        tbody.innerHTML = '<tr><td colspan="6" style="color: var(--accent-red);">' + escapeHtml(e.message) + '</td></tr>';
+      }}
+    }}
+
+    async function createPrefixSnapshot() {{
+      if (!selectedPrefixPath) return showAlert('No prefix selected.', true);
+      const label = document.getElementById('snapshot-label-input').value.trim() || 'Manual Snapshot';
+      try {{
+        const res = await fetch('/api/snapshots/create', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath, label: label }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Snapshot failed');
+        showAlert('Snapshot ' + data.snapshot.id + ' captured!', false);
+        document.getElementById('snapshot-label-input').value = '';
+        refreshPrefixSnapshots();
+      }} catch (e) {{
+        showAlert('Failed to create snapshot: ' + e.message, true);
+      }}
+    }}
+
+    async function restorePrefixSnapshot(snapId) {{
+      if (!confirm('Rollback prefix to snapshot ' + snapId + '? Current modifications will be reverted.')) return;
+      try {{
+        const res = await fetch('/api/snapshots/restore', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath, snapshot_id: snapId }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Restore failed');
+        showAlert('Successfully rolled back to snapshot ' + snapId, false);
+        refreshPrefixComponents();
+        refreshPrefixOverrides();
+        refreshPrefixSnapshots();
+      }} catch (e) {{
+        showAlert('Rollback failed: ' + e.message, true);
+      }}
+    }}
+
+    async function deletePrefixSnapshot(snapId) {{
+      if (!confirm('Delete snapshot ' + snapId + '?')) return;
+      try {{
+        const res = await fetch('/api/snapshots/delete', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath, snapshot_id: snapId }})
+        }});
+        if (!res.ok) throw new Error('Deletion failed');
+        showAlert('Deleted snapshot ' + snapId, false);
+        refreshPrefixSnapshots();
+      }} catch (e) {{
+        showAlert('Failed to delete snapshot: ' + e.message, true);
+      }}
+    }}
+
+    async function refreshPrefixProcesses() {{
+      if (!selectedPrefixPath) return;
+      const tbody = document.getElementById('surgery-processes-body');
+      tbody.innerHTML = '<tr><td colspan="4" style="color: var(--fg-subtle);">Querying active prefix processes...</td></tr>';
+      try {{
+        const res = await fetch('/api/taskmgr/processes?prefix_path=' + encodeURIComponent(selectedPrefixPath));
+        if (!res.ok) throw new Error('Failed to query processes');
+        const procs = await res.json();
+        tbody.innerHTML = '';
+        if (!procs.length) {{
+          tbody.innerHTML = '<tr><td colspan="4" style="color: var(--fg-subtle);">No active processes running in this prefix.</td></tr>';
+          return;
+        }}
+        procs.forEach(p => {{
+          const row = document.createElement('tr');
+          row.innerHTML =
+            '<td><code>' + p.pid + '</code></td>' +
+            '<td><strong>' + escapeHtml(p.name) + '</strong></td>' +
+            '<td>' + p.rss_mb + ' MB</td>' +
+            '<td style="font-size: 11px; color: var(--fg-subtle);">' + escapeHtml(p.cmdline) + '</td>';
+          tbody.appendChild(row);
+        }});
+      }} catch (e) {{
+        tbody.innerHTML = '<tr><td colspan="4" style="color: var(--accent-red);">' + escapeHtml(e.message) + '</td></tr>';
+      }}
+    }}
+
+    async function killPrefixProcesses() {{
+      if (!selectedPrefixPath) return showAlert('No prefix selected.', true);
+      try {{
+        const res = await fetch('/api/taskmgr/kill', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Kill failed');
+        showAlert('Terminated wineserver and prefix processes.', false);
+        refreshPrefixProcesses();
+      }} catch (e) {{
+        showAlert('Failed to kill processes: ' + e.message, true);
+      }}
+    }}
+
+    async function resetPrefixLocks() {{
+      if (!selectedPrefixPath) return showAlert('No prefix selected.', true);
+      try {{
+        const res = await fetch('/api/taskmgr/reset-locks', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Reset locks failed');
+        showAlert('Reset prefix locks: removed ' + (data.removed_locks ? data.removed_locks.length : 0) + ' locks', false);
+      }} catch (e) {{
+        showAlert('Failed to reset locks: ' + e.message, true);
+      }}
+    }}
+
+    async function launchWineUtility(tool) {{
+      if (!selectedPrefixPath) return showAlert('No prefix selected.', true);
+      try {{
+        const res = await fetch('/api/taskmgr/launch', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: selectedPrefixPath, tool: tool }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Launch failed');
+        showAlert('Launched ' + tool + ' in prefix (PID: ' + (data.result ? data.result.pid : '-') + ')', false);
+      }} catch (e) {{
+        showAlert('Failed to launch ' + tool + ': ' + e.message, true);
+      }}
+    }}
+
+    async function loadVaultBackups() {{
+      const tbody = document.getElementById('vault-backups-body');
+      tbody.innerHTML = '<tr><td colspan="5" style="color: var(--fg-subtle);">Loading Vault backups...</td></tr>';
+      try {{
+        const res = await fetch('/api/vault/backups');
+        if (!res.ok) throw new Error('Failed to load vault');
+        const backups = await res.json();
+        tbody.innerHTML = '';
+        if (!backups.length) {{
+          tbody.innerHTML = '<tr><td colspan="5" style="color: var(--fg-subtle);">No save archives in Vault.</td></tr>';
+          return;
+        }}
+        backups.forEach(b => {{
+          const row = document.createElement('tr');
+          const szKb = (b.size_bytes / 1024).toFixed(1) + ' KB';
+          const dt = (b.created_at || '').substring(0, 19).replace('T', ' ');
+          row.innerHTML =
+            '<td><code>' + escapeHtml(b.vault_id) + '</code></td>' +
+            '<td><strong>' + escapeHtml(b.app_name) + '</strong></td>' +
+            '<td>' + szKb + '</td>' +
+            '<td>' + dt + '</td>' +
+            '<td>' +
+              '<button class="btn btn-sm btn-secondary" onclick="restoreVaultBackup(\'' + escapeHtml(b.vault_id) + '\')">Restore</button> ' +
+              '<button class="btn btn-sm btn-error" onclick="deleteVaultBackup(\'' + escapeHtml(b.vault_id) + '\')">&times;</button>' +
+            '</td>';
+          tbody.appendChild(row);
+        }});
+      }} catch (e) {{
+        tbody.innerHTML = '<tr><td colspan="5" style="color: var(--accent-red);">' + escapeHtml(e.message) + '</td></tr>';
+      }}
+    }}
+
+    async function discoverPrefixSaves() {{
+      const pPath = document.getElementById('vault-prefix-input').value.trim() || selectedPrefixPath;
+      const appName = document.getElementById('vault-app-input').value.trim();
+      const div = document.getElementById('vault-discovery-results');
+      if (!pPath) return showAlert('Please specify a prefix path to scan.', true);
+      div.textContent = 'Scanning prefix user directories...';
+      try {{
+        const res = await fetch('/api/vault/saves?prefix_path=' + encodeURIComponent(pPath) + (appName ? '&app=' + encodeURIComponent(appName) : ''));
+        if (!res.ok) throw new Error('Discovery failed');
+        const saves = await res.json();
+        if (!saves.length) {{
+          div.textContent = 'No save folders matching criteria found in this prefix.';
+          return;
+        }}
+        div.innerHTML = '<strong>Found ' + saves.length + ' save location(s):</strong><br>' +
+          saves.map(s => '&bull; ' + escapeHtml(s.folder_name) + ' (' + escapeHtml(s.category) + ') - ' + (s.size_bytes / 1024).toFixed(1) + ' KB, ' + s.files_count + ' files').join('<br>');
+      }} catch (e) {{
+        div.textContent = 'Discovery error: ' + e.message;
+      }}
+    }}
+
+    async function backupPrefixSaves() {{
+      const pPath = document.getElementById('vault-prefix-input').value.trim() || selectedPrefixPath;
+      const appName = document.getElementById('vault-app-input').value.trim();
+      if (!pPath || !appName) return showAlert('Prefix path and app name are required for backup.', true);
+      try {{
+        const res = await fetch('/api/vault/backup', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prefix_path: pPath, app_name: appName }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Backup failed');
+        showAlert('Backed up saves for ' + appName + ' to Vault!', false);
+        loadVaultBackups();
+      }} catch (e) {{
+        showAlert('Backup failed: ' + e.message, true);
+      }}
+    }}
+
+    async function restoreVaultBackup(vaultId) {{
+      const targetPrefix = prompt('Enter target prefix path to restore save into:', selectedPrefixPath || '');
+      if (!targetPrefix) return;
+      try {{
+        const res = await fetch('/api/vault/restore', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ vault_id: vaultId, prefix_path: targetPrefix }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Restore failed');
+        showAlert('Save ' + vaultId + ' successfully restored into prefix!', false);
+      }} catch (e) {{
+        showAlert('Restore failed: ' + e.message, true);
+      }}
+    }}
+
+    async function deleteVaultBackup(vaultId) {{
+      if (!confirm('Permanently delete backup ' + vaultId + '?')) return;
+      try {{
+        const res = await fetch('/api/vault/delete', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ vault_id: vaultId }})
+        }});
+        if (!res.ok) throw new Error('Deletion failed');
+        showAlert('Deleted backup ' + vaultId, false);
+        loadVaultBackups();
+      }} catch (e) {{
+        showAlert('Failed to delete backup: ' + e.message, true);
+      }}
+    }}
+
+    let currentPrescription = null;
+
+    async function generateHealingPrescription() {{
+      const logText = document.getElementById('diag-log').value.trim();
+      if (!logText) return showAlert('Please paste error log or terminal output.', true);
+      try {{
+        const res = await fetch('/api/prescriptions/generate', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ log: logText, app_name: 'target_app.exe', prefix_path: selectedPrefixPath }})
+        }});
+        const rx = await res.json();
+        if (!res.ok) throw new Error(rx.error || 'Failed to generate prescription');
+        currentPrescription = rx;
+
+        const card = document.getElementById('healing-rx-card');
+        const content = document.getElementById('rx-content');
+        let html = '<p><strong>Root Causes Detected:</strong></p><ul style="padding-left: 20px; margin-bottom: 10px;">';
+        rx.root_causes.forEach(rc => {{ html += '<li>' + escapeHtml(rc) + '</li>'; }});
+        html += '</ul>';
+
+        if (rx.recommended_runner) {{
+          html += '<p><strong>Recommended Runner:</strong> <code style="color: var(--primary);">' + escapeHtml(rx.recommended_runner) + '</code></p>';
+        }}
+        if (rx.components_to_install && rx.components_to_install.length) {{
+          html += '<p style="margin-top: 6px;"><strong>Components to Install:</strong> ' + rx.components_to_install.map(c => '<span class="badge badge-cyan">' + escapeHtml(c) + '</span>').join(' ') + '</p>';
+        }}
+        if (rx.dll_overrides_to_set && Object.keys(rx.dll_overrides_to_set).length) {{
+          html += '<p style="margin-top: 6px;"><strong>DLL Overrides:</strong> <code>' + escapeHtml(JSON.stringify(rx.dll_overrides_to_set)) + '</code></p>';
+        }}
+        if (rx.env_vars_to_set && Object.keys(rx.env_vars_to_set).length) {{
+          html += '<p style="margin-top: 6px;"><strong>Environment Variables:</strong> <code>' + escapeHtml(JSON.stringify(rx.env_vars_to_set)) + '</code></p>';
+        }}
+
+        content.innerHTML = html;
+        if (selectedPrefixPath) document.getElementById('rx-prefix-input').value = selectedPrefixPath;
+        card.style.display = 'block';
+        card.scrollIntoView({{ behavior: 'smooth' }});
+      }} catch (e) {{
+        showAlert('Prescription error: ' + e.message, true);
+      }}
+    }}
+
+    async function applyHealingPrescription(dryRun = false) {{
+      if (!currentPrescription) return showAlert('No prescription generated.', true);
+      const targetPrefix = document.getElementById('rx-prefix-input').value.trim() || selectedPrefixPath;
+      if (!targetPrefix) return showAlert('Please specify the target prefix path to heal.', true);
+
+      try {{
+        const res = await fetch('/api/prescriptions/apply', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ prescription: currentPrescription, prefix_path: targetPrefix, dry_run: dryRun }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Apply failed');
+        showAlert((dryRun ? '[Dry-Run] ' : '') + 'Applied prescription ' + currentPrescription.id + ' successfully!', false);
+        if (selectedPrefixPath === targetPrefix) {{
+          refreshPrefixComponents();
+          refreshPrefixOverrides();
+          refreshPrefixSnapshots();
+        }}
+      }} catch (e) {{
+        showAlert('Failed to apply prescription: ' + e.message, true);
+      }}
+    }}
+
+    window.addEventListener('DOMContentLoaded', () => {{
+      loadTelemetry();
+      loadRunners();
+      loadVaultBackups();
+    }});
   </script>
 </body>
 </html>"""
@@ -1656,6 +2491,11 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
         self.security = SecurityController()
         self.history_mgr = ExecutionHistoryManager()
         self.component_mgr = WindowsComponentManager()
+        self.fleet_mgr = RunnerFleetManager()
+        self.snapshot_mgr = PrefixSnapshotManager()
+        self.vault_mgr = GameSaveVault()
+        self.task_mgr = PrefixTaskManager()
+        self.prescription_engine = PrescriptionEngine()
         super().__init__(*args, **kwargs)
 
     def log_message(self, format: str, *args):
@@ -1843,6 +2683,59 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
                 self._send_error_json(f"Run '{run_id}' not found", status=404)
                 return
             self._send_json(run)
+            return
+
+        if path == "/api/tuning/tools":
+            tools = check_tuning_tools_availability()
+            presets = {
+                "esports": get_tuning_preset("esports").to_dict(),
+                "4k_fidelity": get_tuning_preset("4k_fidelity").to_dict(),
+                "power_saver": get_tuning_preset("power_saver").to_dict(),
+                "minimal_overlay": get_tuning_preset("minimal_overlay").to_dict(),
+            }
+            self._send_json({"tools": tools, "presets": presets})
+            return
+
+        if path == "/api/runners":
+            runners = self.fleet_mgr.discover_local_runners()
+            self._send_json([r.to_dict() for r in runners])
+            return
+
+        if path == "/api/runners/available":
+            limit = int(query.get("limit", [10])[0]) if query.get("limit") else 10
+            releases = self.fleet_mgr.fetch_available_releases(limit=limit)
+            self._send_json([rel.to_dict() for rel in releases])
+            return
+
+        if path == "/api/snapshots":
+            prefix_path = query.get("prefix_path", [""])[0].strip()
+            if not prefix_path:
+                self._send_error_json("Missing 'prefix_path' query parameter", status=400)
+                return
+            snaps = self.snapshot_mgr.list_snapshots(prefix_path)
+            self._send_json([s.to_dict() for s in snaps])
+            return
+
+        if path == "/api/vault/saves":
+            prefix_path = query.get("prefix_path", [""])[0].strip()
+            app_filter = query.get("app", [""])[0].strip() or None
+            if not prefix_path:
+                self._send_error_json("Missing 'prefix_path' query parameter", status=400)
+                return
+            saves = self.vault_mgr.discover_save_locations(prefix_path, app_name_filter=app_filter)
+            self._send_json([s.to_dict() for s in saves])
+            return
+
+        if path == "/api/vault/backups":
+            app_filter = query.get("app", [""])[0].strip() or None
+            backups = self.vault_mgr.list_backups(app_name_filter=app_filter)
+            self._send_json([b.to_dict() for b in backups])
+            return
+
+        if path == "/api/taskmgr/processes":
+            prefix_path = query.get("prefix_path", [""])[0].strip() or None
+            procs = self.task_mgr.list_prefix_processes(prefix_path)
+            self._send_json([p.to_dict() for p in procs])
             return
 
         self._send_error_json(f"Endpoint '{path}' not found", status=404)
@@ -2166,6 +3059,174 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
                 return
             events = self.diag_engine.analyze_log(log_text)
             self._send_json({"events": [ev.to_dict() for ev in events]})
+            return
+
+        if path == "/api/tuning/preview":
+            tuning_data = payload.get("tuning", {})
+            config = GamingTuningConfig.from_dict(tuning_data)
+            base_cmd = payload.get("command", ["wine", "app.exe"])
+            cmd, env = build_tuning_pipeline(base_cmd, tuning=config)
+            self._send_json({"command": cmd, "env": env})
+            return
+
+        if path == "/api/runners/install":
+            tag = payload.get("archive_or_tag", "").strip()
+            if not tag:
+                self._send_error_json("Missing 'archive_or_tag' in JSON body", status=400)
+                return
+            try:
+                if os.path.isfile(tag):
+                    installed = self.fleet_mgr.install_runner(tag)
+                    self._send_json({"success": True, "runner": installed.to_dict()})
+                    return
+                releases = self.fleet_mgr.fetch_available_releases(limit=20)
+                target = next((r for r in releases if r.tag_name == tag or r.name == tag), None)
+                if not target:
+                    self._send_error_json(f"Runner '{tag}' not found in releases", status=404)
+                    return
+                dest_tar = os.path.join(self.fleet_mgr.runners_dir, f"{target.tag_name}.tar.gz")
+                urllib.request.urlretrieve(target.download_url, dest_tar)
+                installed = self.fleet_mgr.install_runner(dest_tar)
+                self._send_json({"success": True, "runner": installed.to_dict()})
+            except Exception as e:
+                self._send_error_json(f"Runner install error: {e}", status=500)
+            return
+
+        if path == "/api/snapshots/create":
+            prefix_path = payload.get("prefix_path", "").strip()
+            label = payload.get("label", "").strip() or "Manual Snapshot"
+            if not prefix_path or not os.path.isdir(prefix_path):
+                self._send_error_json("Missing or invalid 'prefix_path'", status=400)
+                return
+            try:
+                snap = self.snapshot_mgr.create_snapshot(prefix_path, label=label, trigger="manual")
+                self._send_json({"success": True, "snapshot": snap.to_dict()})
+            except Exception as e:
+                self._send_error_json(f"Snapshot creation error: {e}", status=500)
+            return
+
+        if path == "/api/snapshots/restore":
+            prefix_path = payload.get("prefix_path", "").strip()
+            snapshot_id = payload.get("snapshot_id", "").strip()
+            if not prefix_path or not snapshot_id:
+                self._send_error_json("Missing 'prefix_path' or 'snapshot_id'", status=400)
+                return
+            try:
+                self.snapshot_mgr.restore_snapshot(prefix_path, snapshot_id)
+                self._send_json({"success": True, "restored_id": snapshot_id})
+            except Exception as e:
+                self._send_error_json(f"Snapshot restore error: {e}", status=500)
+            return
+
+        if path == "/api/snapshots/delete":
+            prefix_path = payload.get("prefix_path", "").strip()
+            snapshot_id = payload.get("snapshot_id", "").strip()
+            if not prefix_path or not snapshot_id:
+                self._send_error_json("Missing 'prefix_path' or 'snapshot_id'", status=400)
+                return
+            deleted = self.snapshot_mgr.delete_snapshot(prefix_path, snapshot_id)
+            if not deleted:
+                self._send_error_json(f"Snapshot '{snapshot_id}' not found", status=404)
+                return
+            self._send_json({"success": True, "deleted_id": snapshot_id})
+            return
+
+        if path == "/api/vault/backup":
+            prefix_path = payload.get("prefix_path", "").strip()
+            app_name = payload.get("app_name", "").strip()
+            notes = payload.get("notes", "").strip()
+            if not prefix_path or not app_name:
+                self._send_error_json("Missing 'prefix_path' or 'app_name'", status=400)
+                return
+            try:
+                entry = self.vault_mgr.backup_save(prefix_path, app_name, notes=notes)
+                self._send_json({"success": True, "vault_entry": entry.to_dict()})
+            except Exception as e:
+                self._send_error_json(f"Save backup error: {e}", status=500)
+            return
+
+        if path == "/api/vault/restore":
+            vault_id = payload.get("vault_id", "").strip()
+            prefix_path = payload.get("prefix_path", "").strip()
+            if not vault_id or not prefix_path:
+                self._send_error_json("Missing 'vault_id' or 'prefix_path'", status=400)
+                return
+            try:
+                self.vault_mgr.restore_save(vault_id, prefix_path)
+                self._send_json({"success": True, "restored_id": vault_id})
+            except Exception as e:
+                self._send_error_json(f"Save restore error: {e}", status=500)
+            return
+
+        if path == "/api/vault/delete":
+            vault_id = payload.get("vault_id", "").strip()
+            if not vault_id:
+                self._send_error_json("Missing 'vault_id'", status=400)
+                return
+            deleted = self.vault_mgr.delete_backup(vault_id)
+            if not deleted:
+                self._send_error_json(f"Vault entry '{vault_id}' not found", status=404)
+                return
+            self._send_json({"success": True, "deleted_id": vault_id})
+            return
+
+        if path == "/api/taskmgr/kill":
+            prefix_path = payload.get("prefix_path", "").strip()
+            if not prefix_path:
+                self._send_error_json("Missing 'prefix_path'", status=400)
+                return
+            res = self.task_mgr.kill_prefix_processes(prefix_path)
+            self._send_json({"success": True, "result": res})
+            return
+
+        if path == "/api/taskmgr/reset-locks":
+            prefix_path = payload.get("prefix_path", "").strip()
+            if not prefix_path:
+                self._send_error_json("Missing 'prefix_path'", status=400)
+                return
+            removed = self.task_mgr.reset_prefix_locks(prefix_path)
+            self._send_json({"success": True, "removed_locks": removed})
+            return
+
+        if path == "/api/taskmgr/launch":
+            prefix_path = payload.get("prefix_path", "").strip()
+            tool = payload.get("tool", "").strip()
+            if not prefix_path or not tool:
+                self._send_error_json("Missing 'prefix_path' or 'tool'", status=400)
+                return
+            try:
+                res = self.task_mgr.launch_wine_tool(prefix_path, tool)
+                self._send_json({"success": True, "result": res})
+            except Exception as e:
+                self._send_error_json(f"Tool launch error: {e}", status=400)
+            return
+
+        if path == "/api/prescriptions/generate":
+            log_text = payload.get("log", "")
+            app_name = payload.get("app_name", "application.exe")
+            prefix_path = payload.get("prefix_path")
+            if not log_text:
+                self._send_error_json("Missing 'log' in JSON body", status=400)
+                return
+            events = self.diag_engine.analyze_log(log_text)
+            rx = self.prescription_engine.synthesize(events, app_name=app_name, prefix_path=prefix_path)
+            self._send_json(rx.to_dict())
+            return
+
+        if path == "/api/prescriptions/apply":
+            rx_data = payload.get("prescription", {})
+            prefix_path = payload.get("prefix_path", "").strip()
+            dry_run = bool(payload.get("dry_run", False))
+            if not rx_data or not prefix_path:
+                self._send_error_json("Missing 'prescription' or 'prefix_path'", status=400)
+                return
+            from zcf.diagnostics.prescriptions import HealingPrescription
+            rx = HealingPrescription.from_dict(rx_data)
+            try:
+                res = self.prescription_engine.apply(rx, prefix_path=prefix_path, dry_run=dry_run)
+                self._send_json({"success": True, "result": res})
+            except Exception as e:
+                self._send_error_json(f"Prescription apply error: {e}", status=500)
             return
 
         self._send_error_json(f"Endpoint '{path}' not found", status=404)
