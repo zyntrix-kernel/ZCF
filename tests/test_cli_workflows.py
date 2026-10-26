@@ -279,6 +279,41 @@ class TestCLIWorkflows(unittest.TestCase):
         self.assertIn("Autonomous Healing Prescription", out)
         self.assertIn("d3dx9", out)
 
+    def test_cli_components_workflows(self):
+        """Verifies 'zcf components list' and 'zcf components overrides' commands."""
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["components", "list"])
+        out = buf.getvalue()
+        self.assertIn("Available Windows Components", out)
+        self.assertIn("vcrun2022", out)
+        self.assertIn("dxvk", out)
+
+        prefix = os.path.join(self.test_dir, "comp_prefix")
+        os.makedirs(prefix, exist_ok=True)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["components", "overrides", prefix, "--set", "d3d11", "native,builtin"])
+        out = buf.getvalue()
+        self.assertIn("Configured DLL override for 'd3d11'", out)
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["components", "overrides", prefix, "--json"])
+        self.assertIn("d3d11", buf.getvalue())
+
+    def test_cli_completions_workflows(self):
+        """Verifies 'zcf completions bash/zsh/fish' commands."""
+        for shell in ("bash", "zsh", "fish"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main(["completions", shell])
+            out = buf.getvalue()
+            self.assertIn("zcf", out)
+            self.assertIn("runners", out)
+            self.assertIn("vault", out)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -516,7 +516,9 @@ def get_web_dashboard_html() -> str:
       <div class="card" style="border-left: 4px solid var(--accent-green);">
         <div class="card-title">
           <span>Esports & Gaming Performance Accelerators</span>
-          <span class="badge badge-green" id="tuning-status-badge">Gaming Pipeline Active</span>
+          <div style="display: flex; gap: 6px; align-items: center;" id="tuning-tools-badges">
+            <span class="badge badge-green" id="tuning-status-badge">Gaming Pipeline Active</span>
+          </div>
         </div>
         <p style="color: var(--fg-subtle); margin-bottom: 16px; font-size: 13px;">
           Hardware-accelerated execution wrapper combining Gamescope nested micro-compositor, AMD FSR / NIS spatial upscaling, Feral GameMode governor boosting, and MangoHud frame telemetry.
@@ -1150,6 +1152,39 @@ def get_web_dashboard_html() -> str:
       const activeTab = document.getElementById('tab-' + tabId);
       if (activeTab) activeTab.classList.add('active');
       if (ev && ev.target) ev.target.classList.add('active');
+
+      if (tabId === 'tuning') {{
+        updateTuningPreview();
+        loadTuningTools();
+      }} else if (tabId === 'runners') {{
+        loadRunners();
+      }} else if (tabId === 'vault') {{
+        loadVaultBackups();
+      }} else if (tabId === 'history') {{
+        loadHistory();
+      }} else if (tabId === 'prefixes') {{
+        loadTelemetry();
+      }}
+    }}
+
+    async function loadTuningTools() {{
+      try {{
+        const res = await fetch('/api/tuning/tools');
+        if (!res.ok) return;
+        const data = await res.json();
+        const tools = data.tools || {{}};
+        const container = document.getElementById('tuning-tools-badges');
+        if (container) {{
+          let html = '<span class="badge badge-green">Gaming Pipeline Active</span> ';
+          Object.entries(tools).forEach(([tool, ok]) => {{
+            html += '<span class="badge ' + (ok ? 'badge-green' : 'badge-amber') + '">' +
+              escapeHtml(tool) + ': ' + (ok ? 'Ready' : 'Missing') + '</span> ';
+          }});
+          container.innerHTML = html;
+        }}
+      }} catch (e) {{
+        console.error('Failed to load tuning tools', e);
+      }}
     }}
 
     function closeModal() {{
@@ -2469,6 +2504,8 @@ def get_web_dashboard_html() -> str:
       loadTelemetry();
       loadRunners();
       loadVaultBackups();
+      loadTuningTools();
+      updateTuningPreview();
     }});
   </script>
 </body>
@@ -2555,7 +2592,23 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _drain_body(self):
+        try:
+            if getattr(self, "command", "") == "POST" and not getattr(self, "_body_read", False):
+                self._body_read = True
+                content_len = int(self.headers.get("Content-Length", 0))
+                remaining = content_len
+                while remaining > 0:
+                    chunk_size = min(remaining, 65536)
+                    chunk = self.rfile.read(chunk_size)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+        except Exception:
+            pass
+
     def _send_error_json(self, message: str, status: int = 400):
+        self._drain_body()
         self._send_json({"error": message, "status": status}, status=status)
 
     def _validate_target_path(self, target: Any) -> Optional[str]:
@@ -2768,6 +2821,7 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
 
         try:
             raw_body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            self._body_read = True
             payload = json.loads(raw_body) if raw_body else {}
         except Exception as e:
             self._send_error_json(f"Malformed JSON payload: {e}", status=400)

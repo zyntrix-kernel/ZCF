@@ -407,6 +407,7 @@ class TestWebConsole(unittest.TestCase):
         self.assertIn("prefix-surgery-card", html_str)
         self.assertIn("log-filter-bar", html_str)
         self.assertIn("tab-tuning", html_str)
+        self.assertIn("tuning-tools-badges", html_str)
         self.assertIn("tab-runners", html_str)
         self.assertIn("tab-vault", html_str)
         self.assertIn("healing-rx-card", html_str)

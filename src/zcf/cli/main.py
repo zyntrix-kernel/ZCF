@@ -371,6 +371,106 @@ def cmd_prescribe(args):
             sys.exit(1)
 
 
+def cmd_components(args):
+    from zcf.runtimes.components import WindowsComponentManager
+    mgr = WindowsComponentManager()
+    action = args.components_action
+
+    if action == "list":
+        comps = mgr.list_components()
+        prefix = getattr(args, "prefix", None)
+        data = []
+        for c in comps:
+            is_inst = False
+            if prefix and os.path.isdir(prefix):
+                is_inst = mgr.is_installed_in_prefix(prefix, c.key)
+            data.append({
+                "key": c.key,
+                "name": c.name,
+                "description": c.description,
+                "winetricks_verb": c.winetricks_verb,
+                "verification_files": c.verification_files,
+                "installed": is_inst,
+            })
+        if getattr(args, "json", False):
+            print(json.dumps(data, indent=2))
+            return
+        format_header(f"Available Windows Components & Runtimes ({len(comps)} total)")
+        for item in data:
+            status_tag = f" [{'INSTALLED' if item['installed'] else 'MISSING'}]" if prefix else ""
+            print(f"  * {item['name']} (key: {item['key']}){status_tag}")
+            print(f"    Description: {item['description']}")
+            print(f"    Signatures:  {', '.join(item['verification_files'])}\n")
+
+    elif action == "install":
+        comp_key = args.component
+        prefix = args.prefix_path
+        if not comp_key or not prefix:
+            print("Error: Both <component> and <prefix_path> are required for install.", file=sys.stderr)
+            sys.exit(1)
+        timeout = getattr(args, "timeout", 300) or 300
+        print(f"Installing component '{comp_key}' into prefix: {prefix}...")
+        res = mgr.install(prefix, comp_key, timeout=float(timeout))
+        if res.success:
+            print(f"Component '{res.component_name}' installed and verified successfully!")
+            print(f"Assurance level: {res.assurance_level}")
+        else:
+            print(f"Component installation failed: {res.error or 'Verification failed'}", file=sys.stderr)
+            if res.output:
+                print(f"Output:\n{res.output}", file=sys.stderr)
+            sys.exit(1)
+
+    elif action == "overrides":
+        prefix = args.prefix_path or args.component or getattr(args, "prefix", None)
+        if not prefix:
+            print("Error: <prefix_path> is required for overrides.", file=sys.stderr)
+            sys.exit(1)
+        set_dll = getattr(args, "set", None)
+        remove_dll = getattr(args, "remove", None)
+        if set_dll:
+            dll, mode = set_dll
+            mgr.set_dll_override(prefix, dll, mode)
+            print(f"Configured DLL override for '{dll}': {mode}")
+        elif remove_dll:
+            mgr.remove_dll_override(prefix, remove_dll)
+            print(f"Removed DLL override for '{remove_dll}'")
+
+        overrides = mgr.get_dll_overrides(prefix)
+        if getattr(args, "json", False):
+            print(json.dumps(overrides, indent=2))
+            return
+        format_header(f"Configured DLL Overrides for {prefix}")
+        if not overrides:
+            print("  No custom DLL overrides configured.")
+        for k, v in overrides.items():
+            print(f"  - {k}.dll : {v}")
+
+
+def cmd_completions(args):
+    shell = args.shell
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "completions")
+    if shell == "bash":
+        path = os.path.join(data_dir, "bash", "zcf")
+    elif shell == "zsh":
+        path = os.path.join(data_dir, "zsh", "_zcf")
+    elif shell == "fish":
+        path = os.path.join(data_dir, "fish", "zcf.fish")
+    else:
+        print(f"Unsupported shell: {shell}", file=sys.stderr)
+        sys.exit(1)
+
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as f:
+            print(f.read(), end="")
+    else:
+        if shell == "bash":
+            print("# bash completion for zcf\ncomplete -W 'dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db service integrate history' zcf")
+        elif shell == "zsh":
+            print("#compdef zcf\n_zcf() { _arguments '1: :((dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db service integrate history))' }\n_zcf")
+        elif shell == "fish":
+            print("complete -c zcf -f -a 'dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db service integrate history'")
+
+
 def cmd_service(args):
     action = args.service_action
     if action == "register-binfmt":
@@ -1181,6 +1281,23 @@ def main(argv: Optional[List[str]] = None):
     p_rx.add_argument("--dry-run", action="store_true", help="Simulate repair without modifying prefix")
     p_rx.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_rx.set_defaults(func=cmd_prescribe)
+
+    # components (Windows runtimes & DLL overrides)
+    p_comp = subparsers.add_parser("components", help="Manage Windows runtime components and DLL overrides")
+    p_comp.add_argument("components_action", choices=["list", "install", "overrides"], help="Action to perform")
+    p_comp.add_argument("component", nargs="?", default=None, help="Component key (e.g. vcrun2022, d3dx9, dxvk) for 'install'")
+    p_comp.add_argument("prefix_path", nargs="?", default=None, help="Prefix path for 'install' or 'overrides'")
+    p_comp.add_argument("--prefix", help="Prefix path filter for 'list'")
+    p_comp.add_argument("--timeout", type=int, default=300, help="Installation timeout in seconds (default: 300)")
+    p_comp.add_argument("--set", nargs=2, metavar=("DLL", "MODE"), help="Set DLL override (e.g. --set d3d11 native,builtin)")
+    p_comp.add_argument("--remove", metavar="DLL", help="Remove DLL override")
+    p_comp.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_comp.set_defaults(func=cmd_components)
+
+    # completions
+    p_shell = subparsers.add_parser("completions", help="Output shell completion script for Bash, Zsh, or Fish")
+    p_shell.add_argument("shell", choices=["bash", "zsh", "fish"], help="Target shell")
+    p_shell.set_defaults(func=cmd_completions)
 
     # integrate
     p_int = subparsers.add_parser("integrate", help="Manage Linux desktop application menu shortcuts")

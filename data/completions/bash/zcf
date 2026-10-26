@@ -4,8 +4,16 @@ _zcf_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="dashboard console web gui run inspect env doctor plan test diag research db service integrate history"
+    local commands="dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db service integrate history"
     local db_actions="list show query submit verify delete export import"
+    local runners_actions="list available install"
+    local snapshot_actions="create list restore delete"
+    local vault_actions="discover backup list restore delete"
+    local taskmgr_actions="list kill reset-locks launch"
+    local prescribe_actions="generate apply"
+    local components_actions="list install overrides"
+    local service_actions="register-binfmt unregister-binfmt cleanup-prefixes list-prefixes"
+    local shells="bash zsh fish"
 
     if [[ $cword -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -20,9 +28,68 @@ _zcf_completions() {
             ;;
         run)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--sandbox --no-sandbox --allow-unconfined --dry-run --allow-network --timeout --headless --install-deps" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--no-sandbox --allow-unconfined --dry-run --allow-network --timeout --headless --install-deps --gamemode --gamescope --upscale --fsr-sharpness --fps-limit --mangohud --tuning-preset" -- "$cur") )
             else
                 _filedir
+            fi
+            ;;
+        runners)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$runners_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--limit --json" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        snapshot)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$snapshot_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--label --json" -- "$cur") )
+            else
+                _filedir -d
+            fi
+            ;;
+        vault)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$vault_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--app --notes --json" -- "$cur") )
+            else
+                _filedir -d
+            fi
+            ;;
+        taskmgr)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$taskmgr_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--prefix --json" -- "$cur") )
+            else
+                _filedir -d
+            fi
+            ;;
+        prescribe)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$prescribe_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--app --prefix --dry-run --json" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        components)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$components_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--prefix --timeout --set --remove --json" -- "$cur") )
+            else
+                _filedir -d
+            fi
+            ;;
+        completions)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$shells" -- "$cur") )
             fi
             ;;
         inspect|plan)
@@ -39,7 +106,7 @@ _zcf_completions() {
             ;;
         test)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--dry-run --record --contributor --timeout" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--dry-run --execute --record --contributor --timeout" -- "$cur") )
             else
                 _filedir
             fi
@@ -58,7 +125,7 @@ _zcf_completions() {
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "$db_actions" -- "$cur") )
             elif [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--id --output --file" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--id --app --runtime --arch --status --contributor --verifier --tier --evidence-status --notes --test-procedure --output --file" -- "$cur") )
             else
                 _filedir
             fi
@@ -66,6 +133,20 @@ _zcf_completions() {
         history)
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=( $(compgen -W "--sha256 --limit --compare --clear --json" -- "$cur") )
+            fi
+            ;;
+        service)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$service_actions" -- "$cur") )
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--max-age-days" -- "$cur") )
+            fi
+            ;;
+        integrate)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--name --list --remove" -- "$cur") )
+            else
+                _filedir
             fi
             ;;
         *)

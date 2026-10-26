@@ -7,7 +7,14 @@ _zcf() {
         'console:Launch local browser-based Web Console'
         'web:Launch local browser-based Web Console'
         'gui:Launch graphical Control Center'
-        'run:Execute an application through optimal runtime with sandboxing'
+        'run:Execute an application through optimal runtime with sandboxing and gaming tuning'
+        'runners:Discover, download, and manage Proton and Wine compatibility runners'
+        'snapshot:Time-Machine instant restore points and prefix rollbacks'
+        'vault:Universal Game Save Vault for discovery, backup, and prefix migration'
+        'taskmgr:Monitor active processes, kill wineserver, and launch Wine diagnostic tools'
+        'prescribe:Autonomous healing engine to analyze crashes and auto-repair prefixes'
+        'components:Manage Windows runtime components and DLL overrides'
+        'completions:Output shell completion script for Bash, Zsh, or Fish'
         'integrate:Manage Linux desktop application menu shortcuts'
         'inspect:Inspect an application binary or script'
         'env:Inspect host environment and runtimes'
@@ -42,7 +49,6 @@ _zcf() {
                     ;;
                 run)
                     _arguments \
-                        '--sandbox[Enforce Bubblewrap sandboxing]' \
                         '--no-sandbox[Disable sandboxing]' \
                         '--allow-unconfined[Permit unconfined execution if sandbox unavailable]' \
                         '--dry-run[Perform dry run only]' \
@@ -50,7 +56,66 @@ _zcf() {
                         '--timeout=[Execution timeout in seconds]:timeout:' \
                         '--headless[Force execution under virtual Xvfb display]' \
                         '--install-deps[Automatically install missing package dependencies]' \
+                        '--gamemode[Wrap execution with Feral GameMode]' \
+                        '--gamescope[Execute inside Gamescope nested compositor]' \
+                        '--upscale=[Upscaling filter]:filter:(fsr nis pixel linear)' \
+                        '--fsr-sharpness=[FSR upscaler sharpness (0-10)]:sharpness:' \
+                        '--fps-limit=[Frame rate cap / refresh rate]:fps:' \
+                        '--mangohud[Enable MangoHud performance overlay]' \
+                        '--tuning-preset=[Use preconfigured performance profile]:preset:(esports 4k_fidelity power_saver minimal_overlay)' \
                         '*:application binary:_files'
+                    ;;
+                runners)
+                    _arguments \
+                        '1:(list available install)' \
+                        '--limit=[Max releases to query]:limit:' \
+                        '--json[Output machine-readable JSON]' \
+                        '*:archive or release tag:_files'
+                    ;;
+                snapshot)
+                    _arguments \
+                        '1:(create list restore delete)' \
+                        '--label=[Snapshot description label]:label:' \
+                        '--json[Output machine-readable JSON]' \
+                        '*:prefix path:_files -/'
+                    ;;
+                vault)
+                    _arguments \
+                        '1:(discover backup list restore delete)' \
+                        '--app=[Application name filter]:app:' \
+                        '--notes=[Backup notes]:notes:' \
+                        '--json[Output machine-readable JSON]' \
+                        '*:prefix path:_files -/'
+                    ;;
+                taskmgr)
+                    _arguments \
+                        '1:(list kill reset-locks launch)' \
+                        '--prefix=[Prefix filter]:prefix:_files -/' \
+                        '--json[Output machine-readable JSON]' \
+                        '*:prefix path:_files -/'
+                    ;;
+                prescribe)
+                    _arguments \
+                        '1:(generate apply)' \
+                        '--app=[Application name]:app:' \
+                        '--prefix=[Target prefix path]:prefix:_files -/' \
+                        '--dry-run[Simulate repair without modifying prefix]' \
+                        '--json[Output machine-readable JSON]' \
+                        '*:log file:_files'
+                    ;;
+                components)
+                    _arguments \
+                        '1:(list install overrides)' \
+                        '--prefix=[Prefix path filter]:prefix:_files -/' \
+                        '--timeout=[Installation timeout in seconds]:timeout:' \
+                        '--set[Set DLL override]:*:' \
+                        '--remove=[Remove DLL override]:dll:' \
+                        '--json[Output machine-readable JSON]' \
+                        '*:prefix path:_files -/'
+                    ;;
+                completions)
+                    _arguments \
+                        '1:(bash zsh fish)'
                     ;;
                 inspect|plan|doctor|env)
                     _arguments \
@@ -60,9 +125,9 @@ _zcf() {
                 test)
                     _arguments \
                         '--dry-run[Perform dry run only]' \
+                        '--execute[Perform real live execution test]' \
                         '--record[Record outcome into compatibility knowledge base]' \
                         '--contributor=[Contributor attribution name]:name:' \
-                        '--timeout=[Execution timeout in seconds]:timeout:' \
                         '*:target file:_files'
                     ;;
                 diag)
@@ -78,8 +143,12 @@ _zcf() {
                     ;;
                 db)
                     _arguments \
-                        '1:(list show export import)' \
+                        '1:(list show query submit verify delete export import)' \
                         '--id=[Entry ID]' \
+                        '--app=[Application binary]:app:_files' \
+                        '--runtime=[Runtime identifier]:runtime:' \
+                        '--arch=[Architecture]:arch:' \
+                        '--status=[Status]:status:' \
                         '--output=[Output file]:output file:_files' \
                         '--file=[Input file]:input file:_files'
                     ;;
@@ -90,6 +159,18 @@ _zcf() {
                         '--compare[Compare two run IDs]:*:' \
                         '--clear[Clear all stored execution run logs]' \
                         '--json[Output JSON]'
+                    ;;
+                service)
+                    _arguments \
+                        '1:(register-binfmt unregister-binfmt cleanup-prefixes list-prefixes)' \
+                        '--max-age-days=[Max prefix age in days]:days:'
+                    ;;
+                integrate)
+                    _arguments \
+                        '--name=[Custom display name]:name:' \
+                        '--list[List all currently integrated applications]' \
+                        '--remove[Remove integrated desktop launcher]' \
+                        '*:application binary:_files'
                     ;;
             esac
             ;;
