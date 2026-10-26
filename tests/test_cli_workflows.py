@@ -162,6 +162,56 @@ class TestCLIWorkflows(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 2)
             self.assertIn("Execution Blocked", err_buf.getvalue())
 
+    def test_cli_history_workflow(self):
+        """Verifies 'zcf history' command for listing, inspecting, and clearing runs."""
+        from zcf.execution.history import ExecutionHistoryManager
+        hist_dir = os.path.join(self.test_dir, "history")
+        hist_mgr = ExecutionHistoryManager(storage_dir=hist_dir)
+
+        # Record a run
+        rec = hist_mgr.record_run(
+            artifact_path=self.pe_fixture,
+            artifact_sha256="4"*64,
+            application_name="sample.exe",
+            target_format="pe",
+            target_architecture="x86_64",
+            runtime_id="runtime.wine",
+            runtime_name="Wine",
+            execution_mode="translation",
+            dry_run=True,
+            success=True,
+            exit_code=0,
+            execution_time_seconds=0.05,
+            sandbox_active=False,
+            network_isolated=True,
+            stdout="Sample stdout",
+        )
+
+        with patch("zcf.execution.history.ExecutionHistoryManager", return_value=hist_mgr):
+            # 1. List history
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main(["history"])
+            out = buf.getvalue()
+            self.assertIn("Execution Test History", out)
+            self.assertIn("sample.exe", out)
+            self.assertIn(rec.run_id, out)
+
+            # 2. Inspect specific run
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main(["history", rec.run_id])
+            out = buf.getvalue()
+            self.assertIn("Execution Run Record", out)
+            self.assertIn("sample.exe", out)
+            self.assertIn("Sample stdout", out)
+
+            # 3. Clear history
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main(["history", "--clear"])
+            self.assertIn("Cleared 1 execution run log(s)", buf.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -183,6 +183,9 @@ class CompatibilityPlan:
     confidence_criteria: Dict[str, float] = field(default_factory=dict)
     recommended_configuration: Dict[str, Any] = field(default_factory=dict)
     safe_next_steps: List[str] = field(default_factory=list)
+    evidence_type: str = "static_analysis"
+    similar_profiles: List[Dict[str, Any]] = field(default_factory=list)
+    applied_workarounds: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

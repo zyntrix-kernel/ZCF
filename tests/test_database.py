@@ -313,6 +313,36 @@ class TestCompatibilityDatabase(unittest.TestCase):
         # Traversal entry IDs are safely rejected
         self.assertFalse(self.db.delete_entry("../escaping_id"))
 
+    def test_find_similar_profiles(self):
+        """Verifies fuzzy matching returns relevant profiles when hash differs."""
+        entry1 = CompatibilityEntry(
+            entry_id="zcf_entry_blender_pe",
+            application_name="Blender 3D Modeling Suite",
+            target_sha256="a" * 64,
+            target_format="pe",
+            target_architecture="x86_64",
+            status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+            last_verified="2026-10-24T00:00:00Z",
+            recommended_runtime="runtime.wine",
+        )
+        entry2 = CompatibilityEntry(
+            entry_id="zcf_entry_gimp_pe",
+            application_name="GIMP Image Editor",
+            target_sha256="b" * 64,
+            target_format="pe",
+            target_architecture="x86_64",
+            status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+            last_verified="2026-10-24T00:00:00Z",
+            recommended_runtime="runtime.wine",
+        )
+        self.db.add_entry(entry1)
+        self.db.add_entry(entry2)
+
+        # Match by name token "blender"
+        similar = self.db.find_similar_profiles(name="blender-v4.1.exe", format_type="pe", arch="x86_64")
+        self.assertGreaterEqual(len(similar), 1)
+        self.assertEqual(similar[0].entry_id, "zcf_entry_blender_pe")
+
 
 if __name__ == "__main__":
     unittest.main()

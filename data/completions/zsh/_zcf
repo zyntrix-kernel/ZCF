@@ -16,6 +16,7 @@ _zcf() {
         'diag:Analyze runtime failure log and synthesize fixes'
         'research:Execute 11-step empirical reverse engineering workflow'
         'db:Query or manage compatibility database'
+        'history:View and compare execution test history'
         'service:Manage ZCF binfmt and system integration'
     )
 
@@ -80,6 +81,14 @@ _zcf() {
                         '--id=[Entry ID]' \
                         '--output=[Output file]:output file:_files' \
                         '--file=[Input file]:input file:_files'
+                    ;;
+                history)
+                    _arguments \
+                        '--sha256=[Filter runs by SHA-256]:hash:' \
+                        '--limit=[Max runs to display]:limit:' \
+                        '--compare[Compare two run IDs]:*:' \
+                        '--clear[Clear all stored execution run logs]' \
+                        '--json[Output JSON]'
                     ;;
             esac
             ;;

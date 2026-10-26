@@ -31,6 +31,7 @@ from zcf.diagnostics.analyzer import DiagnosticEngine
 from zcf.diagnostics.remediator import AutomatedRemediator
 from zcf.environment.inspector import EnvironmentInspector
 from zcf.execution.display import VirtualDisplayManager
+from zcf.execution.history import ExecutionHistoryManager
 from zcf.execution.installer import PackageInstallerBridge
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
@@ -67,6 +68,7 @@ class ExecutionOrchestrator:
         self.desktop_ui = DesktopUI()
         self.installer_bridge = PackageInstallerBridge()
         self.db = CompatibilityDatabase()
+        self.history_mgr = ExecutionHistoryManager()
 
     def execute_lifecycle(
         self,
@@ -98,12 +100,19 @@ class ExecutionOrchestrator:
         # PHASE 2: Collect Evidence (Database + Host Environment)
         # -------------------------------------------------------------
         db_evidence = self.db.get_by_sha256(app.sha256)
+        similar_evidence = None
+        if not db_evidence:
+            similar_evidence = self.db.find_similar_profiles(
+                name=app.file_name,
+                format_type=app.format.value,
+                arch=app.architecture.value,
+            )
         env = self.env_inspector.inspect()
 
         # -------------------------------------------------------------
         # PHASE 3: Deterministic Capability-Driven Compatibility Plan
         # -------------------------------------------------------------
-        plan = self.planner.plan(app, env, db_evidence=db_evidence)
+        plan = self.planner.plan(app, env, db_evidence=db_evidence, similar_evidence=similar_evidence)
 
         if plan.is_blocked:
             raise PlanningError(f"Compatibility planner blocked execution: {plan.blocker_summary}")
@@ -255,12 +264,35 @@ class ExecutionOrchestrator:
             if dry_run:
                 print(f"\n[ZCF Runner Dry Run] Planned launch for '{app.file_name}' via {adapter.get_name()}")
                 print(f"Command: {' '.join(final_cmd)}")
+                dry_stdout = f"[Dry Run] Execution planned successfully via {adapter.get_name()}.\nCommand: {' '.join(final_cmd)}"
+                dur = time.time() - start_time
+                self.history_mgr.record_run(
+                    artifact_path=artifact_path,
+                    artifact_sha256=app.sha256,
+                    application_name=app.file_name,
+                    target_format=app.format.value,
+                    target_architecture=app.architecture.value,
+                    runtime_id=adapter.get_id(),
+                    runtime_name=adapter.get_name(),
+                    execution_mode=plan.execution_mode.value,
+                    dry_run=True,
+                    success=True,
+                    exit_code=0,
+                    execution_time_seconds=dur,
+                    sandbox_active=sandbox_active,
+                    network_isolated=security_policy.isolate_network,
+                    command=final_cmd,
+                    stdout=dry_stdout,
+                    stderr="",
+                    diagnostics=[],
+                    environment={"os": env.os_name, "arch": env.architecture, "kernel": env.kernel_version},
+                )
                 return ExecutionResult(
                     success=True,
                     exit_code=0,
-                    stdout=f"[Dry Run] Execution planned successfully via {adapter.get_name()}.\nCommand: {' '.join(final_cmd)}",
+                    stdout=dry_stdout,
                     stderr="",
-                    execution_time_seconds=time.time() - start_time,
+                    execution_time_seconds=dur,
                     command=final_cmd,
                     isolated_env_path=prefix_path,
                     effective_runtime=adapter.get_id(),
@@ -550,6 +582,28 @@ class ExecutionOrchestrator:
             # -------------------------------------------------------------
             # PHASE 9: Record Results & Formulate Structured ExecutionRecord
             # -------------------------------------------------------------
+            self.history_mgr.record_run(
+                artifact_path=artifact_path,
+                artifact_sha256=app.sha256,
+                application_name=app.file_name,
+                target_format=app.format.value,
+                target_architecture=app.architecture.value,
+                runtime_id=adapter.get_id(),
+                runtime_name=adapter.get_name(),
+                execution_mode=plan.execution_mode.value,
+                dry_run=False,
+                success=exit_code == 0,
+                exit_code=exit_code,
+                execution_time_seconds=elapsed_seconds,
+                sandbox_active=sandbox_active,
+                network_isolated=security_policy.isolate_network,
+                command=final_cmd,
+                stdout=full_output,
+                stderr="",
+                diagnostics=diagnostics_data,
+                environment={"os": env.os_name, "arch": env.architecture, "kernel": env.kernel_version},
+            )
+
             return ExecutionResult(
                 success=exit_code == 0,
                 exit_code=exit_code,

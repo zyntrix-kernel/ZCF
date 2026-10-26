@@ -36,6 +36,7 @@ class CompatibilityPlanner:
         app: ApplicationDescription,
         env: EnvironmentReport,
         db_evidence: Optional[CompatibilityEntry] = None,
+        similar_evidence: Optional[List[CompatibilityEntry]] = None,
     ) -> CompatibilityPlan:
         plan_id = f"plan_{uuid.uuid4().hex[:12]}"
         candidates: List[CandidateEvaluation] = []
@@ -43,6 +44,35 @@ class CompatibilityPlanner:
         missing_reqs: List[str] = []
         safe_steps: List[str] = []
         confidence_criteria: Dict[str, float] = {}
+
+        evidence_type = "static_analysis"
+        similar_profiles_data: List[Dict[str, Any]] = []
+        applied_workarounds: List[Dict[str, Any]] = []
+
+        if db_evidence and app.sha256 and db_evidence.target_sha256 and app.sha256.lower() == db_evidence.target_sha256.lower():
+            evidence_type = "exact_measured"
+            if db_evidence.workarounds:
+                applied_workarounds.extend(db_evidence.workarounds)
+        elif similar_evidence:
+            evidence_type = "heuristic_prediction"
+            for s in similar_evidence[:5]:
+                similar_profiles_data.append({
+                    "entry_id": s.entry_id,
+                    "application_name": s.application_name,
+                    "target_format": s.target_format,
+                    "target_architecture": s.target_architecture,
+                    "status": s.status.value,
+                    "recommended_runtime": s.recommended_runtime,
+                    "provenance_tier": s.provenance_tier.value,
+                    "workarounds": s.workarounds,
+                })
+            best_sim = similar_evidence[0]
+            if best_sim.workarounds:
+                applied_workarounds.extend(best_sim.workarounds)
+                safe_steps.append(
+                    f"Advisory: Similar profile '{best_sim.application_name}' recommends workarounds: "
+                    + "; ".join(w.get("issue", "") + " -> " + w.get("solution", "") for w in best_sim.workarounds)
+                )
 
         selected_id: Optional[str] = None
         selected_name: Optional[str] = None
@@ -242,6 +272,9 @@ class CompatibilityPlanner:
                     notes += f" [Ignored ZCF Database: contradictory provenance/status combination]"
                 else:
                     notes += f" [Unverified/Community in ZCF Database: {db_evidence.status.value}]"
+            elif similar_evidence and any(s.recommended_runtime == rid for s in similar_evidence):
+                matching_sim = next(s for s in similar_evidence if s.recommended_runtime == rid)
+                notes += f" [Heuristic Match: '{matching_sim.application_name}' recommends {matching_sim.recommended_runtime}]"
 
             candidates.append(
                 CandidateEvaluation(
@@ -374,4 +407,7 @@ class CompatibilityPlanner:
             candidate_evaluations=candidates,
             confidence_criteria=confidence_criteria,
             safe_next_steps=safe_steps,
+            evidence_type=evidence_type,
+            similar_profiles=similar_profiles_data,
+            applied_workarounds=applied_workarounds,
         )

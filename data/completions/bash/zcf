@@ -4,7 +4,7 @@ _zcf_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="dashboard console web gui run inspect env plan test diag research db service integrate"
+    local commands="dashboard console web gui run inspect env plan test diag research db service integrate history"
     local db_actions="list show query submit verify delete export import"
 
     if [[ $cword -eq 1 ]]; then
@@ -56,6 +56,11 @@ _zcf_completions() {
                 COMPREPLY=( $(compgen -W "--id --output --file" -- "$cur") )
             else
                 _filedir
+            fi
+            ;;
+        history)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "--sha256 --limit --compare --clear --json" -- "$cur") )
             fi
             ;;
         *)

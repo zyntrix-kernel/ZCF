@@ -218,11 +218,20 @@ def cmd_plan(args):
     app_inspector = ApplicationInspector()
     env_inspector = EnvironmentInspector()
     planner = CompatibilityPlanner()
+    db = CompatibilityDatabase()
 
     try:
         app = app_inspector.inspect(args.artifact_path)
         env = env_inspector.inspect()
-        plan = planner.plan(app, env)
+        db_evidence = db.get_by_sha256(app.sha256)
+        similar_evidence = None
+        if not db_evidence:
+            similar_evidence = db.find_similar_profiles(
+                name=app.file_name,
+                format_type=app.format.value,
+                arch=app.architecture.value,
+            )
+        plan = planner.plan(app, env, db_evidence=db_evidence, similar_evidence=similar_evidence)
 
         if args.json:
             print(json.dumps(plan.to_dict(), indent=2))
@@ -232,8 +241,19 @@ def cmd_plan(args):
             print(f"  Execution Mode:   {plan.execution_mode.value.upper()}")
             print(f"  Selected Runtime: {plan.selected_runtime_name or 'None'}")
             print(f"  Confidence Score: {plan.confidence_score * 100:.1f}%")
+            print(f"  Evidence Type:    {plan.evidence_type.upper().replace('_', ' ')}")
             print(f"\n  Reasoning:")
             print(f"    {plan.reasoning}")
+
+            if plan.similar_profiles:
+                print("\n  Similar Known Profiles:")
+                for s in plan.similar_profiles[:3]:
+                    print(f"    [*] {s['application_name']} ({s['entry_id']}) -> {s['recommended_runtime']} [{s['status']}]")
+
+            if plan.applied_workarounds:
+                print("\n  Known / Recommended Workarounds:")
+                for w in plan.applied_workarounds:
+                    print(f"    [!] {w.get('issue', 'Issue')}: {w.get('solution', '')}")
 
             if plan.satisfied_requirements:
                 print("\n  Satisfied Requirements:")
@@ -260,16 +280,26 @@ def cmd_test(args):
     registry = RuntimeRegistry()
     planner = CompatibilityPlanner(registry)
     security = SecurityController()
+    db = CompatibilityDatabase()
 
     try:
         security.validate_execution_safety(args.artifact_path)
         app = app_inspector.inspect(args.artifact_path)
         env = env_inspector.inspect()
-        plan = planner.plan(app, env)
+        db_evidence = db.get_by_sha256(app.sha256)
+        similar_evidence = None
+        if not db_evidence:
+            similar_evidence = db.find_similar_profiles(
+                name=app.file_name,
+                format_type=app.format.value,
+                arch=app.architecture.value,
+            )
+        plan = planner.plan(app, env, db_evidence=db_evidence, similar_evidence=similar_evidence)
 
         format_header(f"ZCF Execution Test: {app.file_name}")
         print(f"  Selected Runtime: {plan.selected_runtime_name or 'None'}")
         print(f"  Execution Mode:   {plan.execution_mode.value.upper()}")
+        print(f"  Evidence Type:    {plan.evidence_type.upper().replace('_', ' ')}")
 
         # 1. Hard blocker: No suitable runtime adapter exists for this format/architecture
         if not plan.selected_runtime_id:
@@ -370,12 +400,125 @@ def cmd_test(args):
                 )
                 print(f"\n  [Database] Test outcome recorded into local knowledge base: {entry.entry_id}")
 
-            if not result.success:
-                sys.exit(result.exit_code if result.exit_code != 0 else 1)
+        from zcf.execution.history import ExecutionHistoryManager
+        history_mgr = ExecutionHistoryManager()
+        history_mgr.record_run(
+            artifact_path=args.artifact_path,
+            artifact_sha256=app.sha256,
+            application_name=app.file_name,
+            target_format=app.format.value,
+            target_architecture=app.architecture.value,
+            runtime_id=plan.selected_runtime_id or "none",
+            runtime_name=plan.selected_runtime_name or "None",
+            execution_mode=plan.execution_mode.value,
+            dry_run=args.dry_run,
+            success=result.success if not args.dry_run else True,
+            exit_code=0 if args.dry_run else result.exit_code,
+            execution_time_seconds=0.0 if args.dry_run else result.execution_time_seconds,
+            sandbox_active=False,
+            network_isolated=True,
+            command=getattr(result, "command", []),
+            stdout=result.stdout,
+            stderr=getattr(result, "stderr", ""),
+            diagnostics=getattr(result, "diagnostics", []),
+            environment={"os": env.os_name, "arch": env.architecture, "kernel": env.kernel_version},
+        )
+
+        if not args.dry_run and not result.success:
+            sys.exit(result.exit_code if result.exit_code != 0 else 1)
 
     except Exception as e:
         print(f"Error during execution test: {str(e)}", file=sys.stderr)
         sys.exit(1)
+
+
+def cmd_history(args):
+    from zcf.execution.history import ExecutionHistoryManager
+    history_mgr = ExecutionHistoryManager()
+
+    if getattr(args, "clear", False):
+        count = history_mgr.clear_runs()
+        print(f"[ZCF History] Cleared {count} execution run log(s).")
+        return
+
+    if getattr(args, "compare", None):
+        ids = args.compare
+        if len(ids) != 2:
+            print("Error: --compare requires exactly two run IDs.", file=sys.stderr)
+            sys.exit(1)
+        try:
+            diff = history_mgr.compare_runs(ids[0], ids[1])
+            if getattr(args, "json", False):
+                print(json.dumps(diff, indent=2))
+            else:
+                format_header(f"ZCF Execution Run Comparison: {ids[0]} vs {ids[1]}")
+                print(f"  Run A: {diff['run_a']['run_id']} ({diff['run_a']['timestamp'][:19]})")
+                print(f"    Application: {diff['run_a']['application']} | Runtime: {diff['run_a']['runtime']}")
+                print(f"    Exit Code:   {diff['run_a']['exit_code']} | Status: {'SUCCESS' if diff['run_a']['success'] else 'FAILED'}")
+                print(f"    Duration:    {diff['run_a']['execution_time_seconds']:.4f}s | Dry Run: {diff['run_a']['dry_run']}")
+                print(f"\n  Run B: {diff['run_b']['run_id']} ({diff['run_b']['timestamp'][:19]})")
+                print(f"    Application: {diff['run_b']['application']} | Runtime: {diff['run_b']['runtime']}")
+                print(f"    Exit Code:   {diff['run_b']['exit_code']} | Status: {'SUCCESS' if diff['run_b']['success'] else 'FAILED'}")
+                print(f"    Duration:    {diff['run_b']['execution_time_seconds']:.4f}s | Dry Run: {diff['run_b']['dry_run']}")
+                print("\n  Comparison Findings:")
+                print(f"    Runtime Changed:        {diff['differences']['runtime_changed']}")
+                print(f"    Exit Code Changed:      {diff['differences']['exit_code_changed']}")
+                print(f"    Execution Time Delta:   {diff['differences']['execution_time_delta_seconds']:+.4f}s")
+                print(f"    Outcome Improved:       {diff['differences']['outcome_improved']}")
+        except Exception as e:
+            print(f"Error during run comparison: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if getattr(args, "id", None):
+        run = history_mgr.get_run(args.id)
+        if not run:
+            print(f"Error: Run '{args.id}' not found.", file=sys.stderr)
+            sys.exit(1)
+        if getattr(args, "json", False):
+            print(json.dumps(run, indent=2))
+        else:
+            format_header(f"ZCF Execution Run Record: {run['run_id']}")
+            print(f"  Timestamp:       {run['timestamp']}")
+            print(f"  Application:     {run['application_name']} ({run['target_format'].upper()} {run['target_architecture']})")
+            print(f"  Artifact Path:   {run['artifact_path']}")
+            print(f"  SHA-256:         {run['artifact_sha256']}")
+            print(f"  Runtime:         {run['runtime_name']} ({run['runtime_id']})")
+            print(f"  Execution Mode:  {run['execution_mode'].upper()}")
+            print(f"  Dry Run:         {run['dry_run']}")
+            print(f"  Success:         {run['success']}")
+            print(f"  Exit Code:       {run['exit_code']}")
+            print(f"  Execution Time:  {run['execution_time_seconds']:.4f}s")
+            print(f"  Sandbox Active:  {run['sandbox_active']}")
+            print(f"  Network Iso:     {run['network_isolated']}")
+            if run.get("command"):
+                print(f"  Command:         {' '.join(run['command'])}")
+            if run.get("diagnostics"):
+                print("\n  Diagnostics Recognized:")
+                for d in run["diagnostics"]:
+                    print(f"    [!] {d.get('signature')}: {d.get('root_cause')}")
+            if run.get("stdout"):
+                print(f"\n  Process Output:\n{run['stdout'].strip()}")
+            if run.get("stderr"):
+                print(f"\n  Error Output:\n{run['stderr'].strip()}")
+        return
+
+    # List runs
+    runs = history_mgr.list_runs(sha256=getattr(args, "sha256", None), limit=getattr(args, "limit", 20) or 20)
+    if getattr(args, "json", False):
+        print(json.dumps(runs, indent=2))
+    else:
+        format_header(f"ZCF Execution Test History ({len(runs)} recent runs)")
+        if not runs:
+            print("  No execution or test runs recorded yet.")
+            print("  Run 'zcf test <path>' or 'zcf run <path>' to generate execution history.")
+        for r in runs:
+            status_badge = "[SUCCESS]" if r.get("success") else "[FAILED]"
+            mode_badge = "(Dry Run)" if r.get("dry_run") else "(Live)"
+            print(f"  [{r.get('run_id')}] {r.get('application_name')} via {r.get('runtime_name')} {status_badge} {mode_badge}")
+            print(f"    Timestamp: {r.get('timestamp')[:19]} | Exit Code: {r.get('exit_code')} | Duration: {r.get('execution_time_seconds', 0.0):.4f}s")
+            if r.get("artifact_sha256"):
+                print(f"    SHA-256:   {r.get('artifact_sha256')[:16]}...\n")
 
 
 def cmd_diag(args):
@@ -722,6 +865,16 @@ def main(argv: Optional[List[str]] = None):
     p_db.add_argument("--output", help="Output file path (for 'export')")
     p_db.add_argument("--file", help="Input file path (for 'import')")
     p_db.set_defaults(func=cmd_db)
+
+    # history
+    p_hist = subparsers.add_parser("history", help="View, inspect, and compare execution and test run history")
+    p_hist.add_argument("id", nargs="?", default=None, help="Specific run ID to inspect in detail")
+    p_hist.add_argument("--sha256", help="Filter runs by artifact SHA-256")
+    p_hist.add_argument("--limit", type=int, default=20, help="Max number of runs to display (default: 20)")
+    p_hist.add_argument("--compare", nargs=2, metavar=("RUN_A", "RUN_B"), help="Compare two run IDs side-by-side")
+    p_hist.add_argument("--clear", action="store_true", help="Clear all stored execution run logs")
+    p_hist.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_hist.set_defaults(func=cmd_history)
 
     args = parser.parse_args(argv)
     if hasattr(args, "func"):

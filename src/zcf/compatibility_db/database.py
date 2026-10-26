@@ -440,6 +440,72 @@ class CompatibilityDatabase:
             results.append(entry)
         return results
 
+    def find_similar_profiles(
+        self,
+        name: str,
+        format_type: Optional[str] = None,
+        arch: Optional[str] = None,
+        limit: int = 5,
+    ) -> List[CompatibilityEntry]:
+        """
+        Fuzzy name and metadata matching to discover relevant profiles when SHA-256 differs.
+        Scores candidate profiles by name token overlap, format compatibility, and architecture alignment.
+        """
+        if not name:
+            return []
+
+        # Tokenize search name
+        cleaned_search = re.sub(r"\.(exe|msi|elf|so|dll|bin|sh|apk|appimage)$", "", name, flags=re.IGNORECASE)
+        tokens = set(re.findall(r"[a-zA-Z0-9]+", cleaned_search.lower()))
+        meaningful_tokens = {t for t in tokens if len(t) >= 2 and t not in ("the", "app", "file", "setup", "installer")}
+
+        scored_candidates: List[tuple[float, CompatibilityEntry]] = []
+
+        for entry in self.list_all():
+            score = 0.0
+            entry_name_clean = re.sub(r"\.(exe|msi|elf|so|dll|bin|sh|apk|appimage)$", "", entry.application_name, flags=re.IGNORECASE)
+            entry_tokens = set(re.findall(r"[a-zA-Z0-9]+", entry_name_clean.lower())) | set(
+                re.findall(r"[a-zA-Z0-9]+", entry.entry_id.lower())
+            )
+
+            # 1. Exact or substring match in name
+            if cleaned_search.lower() == entry_name_clean.lower():
+                score += 10.0
+            elif cleaned_search.lower() in entry_name_clean.lower() or entry_name_clean.lower() in cleaned_search.lower():
+                score += 6.0
+            else:
+                # Token overlap
+                overlap = meaningful_tokens.intersection(entry_tokens)
+                if overlap:
+                    score += len(overlap) * 2.0
+
+            if score <= 0.0:
+                continue
+
+            # 2. Binary format match
+            if format_type and entry.target_format:
+                if format_type.lower() == entry.target_format.lower():
+                    score += 3.0
+                else:
+                    score -= 4.0
+
+            # 3. Architecture match
+            if arch and entry.target_architecture:
+                if arch.lower() == entry.target_architecture.lower() or entry.target_architecture.lower() in ("universal", "all"):
+                    score += 1.5
+
+            # 4. Status / Tier weighting
+            if entry.status == CompatibilityStatus.VERIFIED_COMPATIBLE:
+                score += 2.0
+            elif entry.status == CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND:
+                score += 1.5
+
+            if score > 0.0:
+                scored_candidates.append((score, entry))
+
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        return [entry for _, entry in scored_candidates[:limit]]
+
     def submit_profile(
         self,
         app: ApplicationDescription,

@@ -10,6 +10,10 @@ build/
 .venv/
 venv/
 ENV/
+uv.lock
+.coverage
+.coverage.*
+htmlcov/
 
 # Research Targets (External Repositories)
 research/targets/

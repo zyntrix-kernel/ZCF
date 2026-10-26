@@ -53,6 +53,9 @@ Executes the 11-step empirical reverse-engineering and hypothesis verification w
 .TP
 .B db \fIaction\fR [\fIOPTIONS\fR]
 Manages the compatibility knowledge base. Actions include \fBlist\fR, \fBshow\fR, \fBquery\fR, \fBsubmit\fR, \fBverify\fR, \fBdelete\fR, \fBexport\fR, and \fBimport\fR.
+.TP
+.B history \fR[\fIRUN_ID\fR] [\fB\-\-sha256\fR \fIHASH\fR] [\fB\-\-compare\fR \fIRUN_A\fR \fIRUN_B\fR] [\fB\-\-clear\fR] [\fB\-\-json\fR]
+Views, queries, inspects, and compares persistent application execution and test runs.
 .SH ENVIRONMENT VARIABLES
 .TP
 .B ZCF_PREFIX_DIR

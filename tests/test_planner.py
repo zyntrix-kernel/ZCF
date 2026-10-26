@@ -9,6 +9,8 @@ from zcf.core.models import (
     ApplicationDescription,
     Architecture,
     BinaryFormat,
+    CompatibilityEntry,
+    CompatibilityStatus,
     DisplayServer,
     EnvironmentReport,
     ExecutionMode,
@@ -348,6 +350,46 @@ class TestCompatibilityPlanner(unittest.TestCase):
         valid_plan = self.planner.plan(app, env, db_evidence=valid_ev)
         self.assertGreater(valid_plan.confidence_score, base_score)
         self.assertIn("database_evidence_verified", valid_plan.confidence_criteria)
+
+    def test_plan_heuristic_prediction_with_similar_profiles(self):
+        """Verifies planner distinguishes exact vs heuristic predictions and surfaces workarounds."""
+        app = ApplicationDescription(
+            artifact_path="/tmp/my_editor_v2.exe",
+            file_name="my_editor_v2.exe",
+            sha256="f" * 64,
+            byte_size=5000000,
+            format=BinaryFormat.PE,
+            architecture=Architecture.X86_64,
+            subsystem=Subsystem.GUI,
+        )
+        env = EnvironmentReport(
+            os_name="linux",
+            architecture="x86_64",
+            kernel_version="6.18",
+            available_runtimes=[
+                RuntimeInfo(runtime_id="runtime.wine", name="Wine", installed=True),
+            ],
+        )
+
+        similar_profile = CompatibilityEntry(
+            entry_id="zcf_entry_my_editor_v1",
+            application_name="My Editor",
+            target_sha256="e" * 64,
+            target_format="pe",
+            target_architecture="x86_64",
+            status=CompatibilityStatus.COMPATIBLE_WITH_WORKAROUND,
+            last_verified="2026-10-25T00:00:00Z",
+            recommended_runtime="runtime.wine",
+            workarounds=[{"issue": "Missing fonts", "solution": "Install corefonts"}],
+        )
+
+        plan = self.planner.plan(app, env, db_evidence=None, similar_evidence=[similar_profile])
+        self.assertEqual(plan.evidence_type, "heuristic_prediction")
+        self.assertEqual(len(plan.similar_profiles), 1)
+        self.assertEqual(plan.similar_profiles[0]["entry_id"], "zcf_entry_my_editor_v1")
+        self.assertEqual(len(plan.applied_workarounds), 1)
+        self.assertEqual(plan.applied_workarounds[0]["issue"], "Missing fonts")
+        self.assertTrue(any("Missing fonts" in step for step in plan.safe_next_steps))
 
 
 if __name__ == "__main__":

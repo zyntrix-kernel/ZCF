@@ -292,6 +292,59 @@ class TestWebConsole(unittest.TestCase):
             urllib.request.urlopen(req, timeout=3)
         self.assertEqual(ctx.exception.code, 404)
 
+    def test_api_history_workflow(self):
+        """Verifies history listing, detail, compare, delete, and clear REST endpoints."""
+        # Execute test to generate a run
+        status, _, test_bytes = self._http_post("/api/test", {"path": self.pe_fixture, "dry_run": True})
+        self.assertEqual(status, 200)
+
+        # GET /api/history
+        status, _, hist_bytes = self._http_get("/api/history")
+        self.assertEqual(status, 200)
+        runs = json.loads(hist_bytes.decode("utf-8"))
+        self.assertIsInstance(runs, list)
+        self.assertGreaterEqual(len(runs), 1)
+
+        run_id = runs[0]["run_id"]
+        # GET /api/history/detail
+        status, _, detail_bytes = self._http_get(f"/api/history/detail?id={run_id}")
+        self.assertEqual(status, 200)
+        detail = json.loads(detail_bytes.decode("utf-8"))
+        self.assertEqual(detail["run_id"], run_id)
+        self.assertTrue(detail["dry_run"])
+
+        # Execute second test to compare
+        self._http_post("/api/test", {"path": self.pe_fixture, "dry_run": True})
+        status, _, hist2_bytes = self._http_get("/api/history")
+        runs2 = json.loads(hist2_bytes.decode("utf-8"))
+        self.assertGreaterEqual(len(runs2), 2)
+
+        # POST /api/history/compare
+        status, _, comp_bytes = self._http_post("/api/history/compare", {"run_a": runs2[0]["run_id"], "run_b": runs2[1]["run_id"]})
+        self.assertEqual(status, 200)
+        comp = json.loads(comp_bytes.decode("utf-8"))
+        self.assertIn("differences", comp)
+
+        # POST /api/history/delete
+        status, _, del_bytes = self._http_post("/api/history/delete", {"id": run_id})
+        self.assertEqual(status, 200)
+        del_res = json.loads(del_bytes.decode("utf-8"))
+        self.assertTrue(del_res["success"])
+
+        # POST /api/history/clear
+        status, _, clear_bytes = self._http_post("/api/history/clear", {})
+        self.assertEqual(status, 200)
+        clear_res = json.loads(clear_bytes.decode("utf-8"))
+        self.assertTrue(clear_res["success"])
+
+    def test_api_plan_returns_evidence_type(self):
+        """Verifies POST /api/plan returns explicit evidence_type categorization."""
+        status, _, body = self._http_post("/api/plan", {"path": self.pe_fixture})
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertIn("evidence_type", data)
+        self.assertIn(data["evidence_type"], ("exact_measured", "heuristic_prediction", "static_analysis"))
+
 
 if __name__ == "__main__":
     unittest.main()

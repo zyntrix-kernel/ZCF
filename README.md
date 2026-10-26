@@ -133,17 +133,32 @@ zcf test path/to/app.exe --dry-run
 zcf test path/to/app.exe --execute --record --contributor "My Name"
 ```
 
-### 3.10 Diagnose Runtime Failure Logs & Synthesize Fixes
+### 3.10 Execution Test History & Side-by-Side Comparison
+```bash
+# List recent execution and test runs
+zcf history
+
+# View full execution details (stdout, exit code, sandbox status, command)
+zcf history run_20261026_121446_69db5225_e430b2
+
+# Compare two runs side-by-side
+zcf history --compare RUN_ID_A RUN_ID_B
+
+# Clear history logs
+zcf history --clear
+```
+
+### 3.11 Diagnose Runtime Failure Logs & Synthesize Fixes
 ```bash
 zcf diag path/to/error.log --target path/to/app.exe
 ```
 
-### 3.11 End-to-End Research Investigation
+### 3.12 End-to-End Research Investigation
 ```bash
 zcf research path/to/app.exe path/to/error.log
 ```
 
-### 3.12 Query, Verify & Sync Compatibility Knowledge Base
+### 3.13 Query, Verify & Sync Compatibility Knowledge Base
 ```bash
 # List all compatibility entries
 zcf db list
@@ -164,7 +179,7 @@ zcf db export --output bundle.json
 zcf db import --file bundle.json
 ```
 
-### 3.13 View Documentation Manual Page
+### 3.14 View Documentation Manual Page
 ```bash
 man zcf
 ```

@@ -25,6 +25,7 @@ from zcf.compatibility_db.database import CompatibilityDatabase
 from zcf.diagnostics.analyzer import DiagnosticEngine
 from zcf.diagnostics.remediator import AutomatedRemediator
 from zcf.environment.inspector import EnvironmentInspector
+from zcf.execution.history import ExecutionHistoryManager
 from zcf.inspector.inspector import ApplicationInspector
 from zcf.planner.engine import CompatibilityPlanner
 from zcf.runtimes.prefix_manager import WinePrefixManager
@@ -343,6 +344,7 @@ def get_web_dashboard_html() -> str:
     <button class="nav-btn active" onclick="switchTab('dashboard', event)">System Health</button>
     <button class="nav-btn" onclick="switchTab('inspector', event)">Binary Inspector & Plan</button>
     <button class="nav-btn" onclick="switchTab('test', event)">Execution Test Runner</button>
+    <button class="nav-btn" onclick="switchTab('history', event)">Execution History</button>
     <button class="nav-btn" onclick="switchTab('database', event)">Compatibility Knowledge Base</button>
     <button class="nav-btn" onclick="switchTab('prefixes', event)">Isolated Storage</button>
     <button class="nav-btn" onclick="switchTab('diagnostics', event)">Crash Troubleshooter</button>
@@ -450,6 +452,47 @@ def get_web_dashboard_html() -> str:
         <div class="card-title" id="test-title">Test Results</div>
         <div id="test-summary" style="margin-bottom: 12px;"></div>
         <pre id="test-output"></pre>
+      </div>
+    </section>
+
+    <!-- TAB: EXECUTION HISTORY -->
+    <section id="tab-history" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>Execution & Test Run History</span>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary btn-sm" onclick="compareSelectedRuns()">Compare Selected (2)</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadHistory()">Refresh</button>
+            <button class="btn btn-danger btn-sm" onclick="clearHistory()">Clear All</button>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 36px;">Select</th>
+              <th>Run ID</th>
+              <th>Timestamp</th>
+              <th>Application</th>
+              <th>Runtime</th>
+              <th>Mode</th>
+              <th>Status</th>
+              <th>Exit Code</th>
+              <th>Duration</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body">
+            <tr><td colspan="10" style="color: var(--fg-subtle);">Loading execution history...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" id="history-compare-card" style="display: none;">
+        <div class="card-title">
+          <span>Run Comparison Findings</span>
+          <button class="close-btn" onclick="document.getElementById('history-compare-card').style.display='none'">&times;</button>
+        </div>
+        <div id="history-compare-content"></div>
       </div>
     </section>
 
@@ -662,6 +705,8 @@ def get_web_dashboard_html() -> str:
           }});
         }}
 
+        loadHistory();
+
       }} catch (err) {{
         console.error("Failed to load telemetry:", err);
       }}
@@ -735,8 +780,49 @@ def get_web_dashboard_html() -> str:
         }});
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Planning failed');
+
         document.getElementById('inspect-title').textContent = 'Compatibility Plan: ' + path;
-        document.getElementById('inspect-json').textContent = JSON.stringify(data, null, 2);
+        
+        let evBadge = '<span class="badge badge-cyan">Static Analysis</span>';
+        if (data.evidence_type === 'exact_measured') {{
+          evBadge = '<span class="badge badge-green">Exact Measured Evidence</span>';
+        }} else if (data.evidence_type === 'heuristic_prediction') {{
+          evBadge = '<span class="badge badge-amber">Heuristic Prediction</span>';
+        }}
+
+        let summaryHtml = '<div style="margin-bottom: 16px; padding: 12px; background: var(--code-bg); border-radius: 6px; border: 1px solid var(--card-border);">' +
+          '<div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px;">' +
+            '<strong>Evidence Type:</strong> ' + evBadge +
+            '<span style="margin-left: auto;"><strong>Confidence:</strong> ' + Math.round((data.confidence_score || 0) * 100) + '%</span>' +
+          '</div>' +
+          '<div><strong>Selected Runtime:</strong> <code>' + escapeHtml(data.selected_runtime_name || 'None') + '</code> (' + escapeHtml(data.execution_mode || '').toUpperCase() + ')</div>' +
+          '<div style="color: var(--fg-subtle); margin-top: 4px;">' + escapeHtml(data.reasoning || '') + '</div>';
+
+        if (data.similar_profiles && data.similar_profiles.length > 0) {{
+          summaryHtml += '<div style="margin-top: 10px; border-top: 1px solid var(--card-border); padding-top: 8px;">' +
+            '<strong style="color: var(--accent-amber);">Similar Cataloged Profiles:</strong>' +
+            '<ul style="margin-left: 20px; margin-top: 4px; font-size: 13px;">';
+          data.similar_profiles.forEach(sp => {{
+            summaryHtml += '<li><strong>' + escapeHtml(sp.application_name) + '</strong> (' + escapeHtml(sp.entry_id) + ') &rarr; ' +
+              escapeHtml(sp.recommended_runtime) + ' <span class="badge badge-cyan" style="font-size: 10px;">' + escapeHtml(sp.status) + '</span></li>';
+          }});
+          summaryHtml += '</ul></div>';
+        }}
+
+        if (data.applied_workarounds && data.applied_workarounds.length > 0) {{
+          summaryHtml += '<div style="margin-top: 10px; border-top: 1px solid var(--card-border); padding-top: 8px;">' +
+            '<strong style="color: var(--primary);">Known Workarounds:</strong>' +
+            '<ul style="margin-left: 20px; margin-top: 4px; font-size: 13px;">';
+          data.applied_workarounds.forEach(w => {{
+            summaryHtml += '<li><strong>' + escapeHtml(w.issue || 'Issue') + ':</strong> ' + escapeHtml(w.solution || '') + '</li>';
+          }});
+          summaryHtml += '</ul></div>';
+        }}
+
+        summaryHtml += '</div>';
+
+        const jsonPre = document.getElementById('inspect-json');
+        jsonPre.innerHTML = summaryHtml + '<pre style="background: transparent; border: none; padding: 0;">' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>';
         document.getElementById('inspect-result-card').style.display = 'block';
       }} catch (err) {{
         showAlert('Planning error: ' + err.message, true);
@@ -771,11 +857,152 @@ def get_web_dashboard_html() -> str:
           '<div>Status: ' + statusBadge + ' | Exit Code: <code>' + escapeHtml(data.exit_code) + '</code> | Runtime: <strong>' + escapeHtml(data.runtime || 'None') + '</strong></div>' +
           '<div style="font-size: 13px; color: var(--fg-subtle); margin-top: 4px;">Mode: ' + escapeHtml(data.execution_mode) + ' • Duration: ' + escapeHtml(data.execution_time_seconds) + 's</div>';
 
-        outPre.textContent = (data.stdout || '') + (data.stderr ? '\\nError:\\n' + data.stderr : '') + (data.reasoning ? '\\nReason:\\n' + data.reasoning : '');
+        outPre.textContent = (data.stdout || '') + (data.stderr ? '\nError:\n' + data.stderr : '') + (data.reasoning ? '\nReason:\n' + data.reasoning : '');
         card.style.display = 'block';
         if (record) loadTelemetry();
+        loadHistory();
       }} catch (err) {{
         showAlert('Test execution error: ' + err.message, true);
+      }}
+    }}
+
+    async function loadHistory() {{
+      try {{
+        const res = await fetch('/api/history');
+        if (!res.ok) return;
+        const runs = await res.json();
+        renderHistoryTable(runs);
+      }} catch (err) {{
+        console.error('Failed to load history:', err);
+      }}
+    }}
+
+    function renderHistoryTable(runs) {{
+      const hTable = document.getElementById('history-table-body');
+      hTable.innerHTML = '';
+      if (!runs || runs.length === 0) {{
+        hTable.innerHTML = '<tr><td colspan="10" style="color: var(--fg-subtle);">No execution or test runs recorded yet. Run a test to view history.</td></tr>';
+        return;
+      }}
+      runs.forEach(r => {{
+        const row = document.createElement('tr');
+        const isSuccess = Boolean(r.success);
+        const isDry = Boolean(r.dry_run);
+        row.innerHTML = 
+          '<td><input type="checkbox" class="history-select" value="' + escapeHtml(r.run_id) + '"></td>' +
+          '<td><code>' + escapeHtml(r.run_id) + '</code></td>' +
+          '<td>' + escapeHtml((r.timestamp || '').substring(0, 19).replace('T', ' ')) + '</td>' +
+          '<td><strong>' + escapeHtml(r.application_name) + '</strong></td>' +
+          '<td><code>' + escapeHtml(r.runtime_name || r.runtime_id) + '</code></td>' +
+          '<td><span class="badge ' + (isDry ? 'badge-amber' : 'badge-cyan') + '">' + (isDry ? 'Dry Run' : 'Live') + '</span></td>' +
+          '<td><span class="badge ' + (isSuccess ? 'badge-green' : 'badge-red') + '">' + (isSuccess ? 'SUCCESS' : 'FAILED') + '</span></td>' +
+          '<td><code>' + escapeHtml(r.exit_code) + '</code></td>' +
+          '<td>' + Number(r.execution_time_seconds || 0).toFixed(4) + 's</td>' +
+          '<td><div style="display: flex; gap: 6px;">' +
+            '<button class="btn btn-secondary btn-sm" onclick="viewRun(\'' + escapeHtml(r.run_id) + '\')">Details</button>' +
+            '<button class="btn btn-danger btn-sm" onclick="deleteRun(\'' + escapeHtml(r.run_id) + '\')">Delete</button>' +
+          '</div></td>';
+        hTable.appendChild(row);
+      }});
+    }}
+
+    async function viewRun(runId) {{
+      try {{
+        const res = await fetch('/api/history/detail?id=' + encodeURIComponent(runId));
+        if (!res.ok) throw new Error('Failed to load run details');
+        const data = await res.json();
+        document.getElementById('modal-title').textContent = 'Execution Run: ' + runId;
+        document.getElementById('modal-content').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('profile-modal').classList.add('active');
+      }} catch (err) {{
+        showAlert('Error loading run: ' + err.message, true);
+      }}
+    }}
+
+    async function deleteRun(runId) {{
+      if (!confirm('Delete execution run record "' + runId + '"?')) return;
+      try {{
+        const res = await fetch('/api/history/delete', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ id: runId }})
+        }});
+        if (!res.ok) throw new Error('Deletion request failed');
+        showAlert('Deleted run record ' + runId, false);
+        loadHistory();
+      }} catch (err) {{
+        showAlert('Error deleting run: ' + err.message, true);
+      }}
+    }}
+
+    async function clearHistory() {{
+      if (!confirm('Clear all execution run records?')) return;
+      try {{
+        const res = await fetch('/api/history/clear', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{}})
+        }});
+        if (!res.ok) throw new Error('Clear request failed');
+        const data = await res.json();
+        showAlert('Cleared ' + (data.cleared_count || 0) + ' run records.', false);
+        loadHistory();
+      }} catch (err) {{
+        showAlert('Error clearing history: ' + err.message, true);
+      }}
+    }}
+
+    async function compareSelectedRuns() {{
+      const checkboxes = Array.from(document.querySelectorAll('.history-select:checked'));
+      if (checkboxes.length !== 2) {{
+        return showAlert('Please select exactly 2 runs using the checkboxes to compare side-by-side.');
+      }}
+      const runA = checkboxes[0].value;
+      const runB = checkboxes[1].value;
+      try {{
+        const res = await fetch('/api/history/compare', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ run_a: runA, run_b: runB }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Comparison failed');
+
+        const card = document.getElementById('history-compare-card');
+        const content = document.getElementById('history-compare-content');
+        
+        content.innerHTML = 
+          '<div class="grid-2" style="margin-bottom: 16px;">' +
+            '<div style="background: var(--code-bg); padding: 14px; border-radius: 6px; border: 1px solid var(--card-border);">' +
+              '<h4 style="color: var(--primary); margin-bottom: 8px;">Run A: ' + escapeHtml(data.run_a.run_id) + '</h4>' +
+              '<div><strong>Application:</strong> ' + escapeHtml(data.run_a.application) + '</div>' +
+              '<div><strong>Runtime:</strong> ' + escapeHtml(data.run_a.runtime) + '</div>' +
+              '<div><strong>Mode:</strong> ' + (data.run_a.dry_run ? 'Dry Run' : 'Live') + '</div>' +
+              '<div><strong>Exit Code:</strong> <code>' + escapeHtml(data.run_a.exit_code) + '</code></div>' +
+              '<div><strong>Duration:</strong> ' + Number(data.run_a.execution_time_seconds || 0).toFixed(4) + 's</div>' +
+              '<div><strong>Sandbox:</strong> ' + (data.run_a.sandbox_active ? 'Active' : 'Unconfined') + '</div>' +
+            '</div>' +
+            '<div style="background: var(--code-bg); padding: 14px; border-radius: 6px; border: 1px solid var(--card-border);">' +
+              '<h4 style="color: var(--primary); margin-bottom: 8px;">Run B: ' + escapeHtml(data.run_b.run_id) + '</h4>' +
+              '<div><strong>Application:</strong> ' + escapeHtml(data.run_b.application) + '</div>' +
+              '<div><strong>Runtime:</strong> ' + escapeHtml(data.run_b.runtime) + '</div>' +
+              '<div><strong>Mode:</strong> ' + (data.run_b.dry_run ? 'Dry Run' : 'Live') + '</div>' +
+              '<div><strong>Exit Code:</strong> <code>' + escapeHtml(data.run_b.exit_code) + '</code></div>' +
+              '<div><strong>Duration:</strong> ' + Number(data.run_b.execution_time_seconds || 0).toFixed(4) + 's</div>' +
+              '<div><strong>Sandbox:</strong> ' + (data.run_b.sandbox_active ? 'Active' : 'Unconfined') + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="background: var(--code-bg); padding: 14px; border-radius: 6px; border: 1px solid var(--card-border);">' +
+            '<h4 style="margin-bottom: 8px;">Comparison Analysis</h4>' +
+            '<div><strong>Runtime Changed:</strong> ' + (data.differences.runtime_changed ? 'Yes' : 'No') + '</div>' +
+            '<div><strong>Exit Code Changed:</strong> ' + (data.differences.exit_code_changed ? 'Yes' : 'No') + '</div>' +
+            '<div><strong>Execution Time Delta:</strong> ' + Number(data.differences.execution_time_delta_seconds || 0).toFixed(4) + 's</div>' +
+            '<div><strong>Outcome Improved:</strong> ' + (data.differences.outcome_improved ? '<span style="color: var(--accent-green);">YES</span>' : 'No') + '</div>' +
+          '</div>';
+
+        card.style.display = 'block';
+      }} catch (err) {{
+        showAlert('Comparison error: ' + err.message, true);
       }}
     }}
 
@@ -850,6 +1077,7 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
         self.wine_prefix_mgr = WinePrefixManager()
         self.proton_prefix_mgr = WinePrefixManager(base_dir=os.path.expanduser("~/.zcf/proton_prefixes"))
         self.security = SecurityController()
+        self.history_mgr = ExecutionHistoryManager()
         super().__init__(*args, **kwargs)
 
     def log_message(self, format: str, *args):
@@ -984,6 +1212,28 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == "/api/history":
+            sha = query.get("sha256", [""])[0].strip() or None
+            try:
+                limit = int(query.get("limit", [50])[0])
+            except ValueError:
+                limit = 50
+            runs = self.history_mgr.list_runs(sha256=sha, limit=limit)
+            self._send_json(runs)
+            return
+
+        if path == "/api/history/detail":
+            run_id = query.get("id", [""])[0].strip()
+            if not run_id:
+                self._send_error_json("Missing 'id' query parameter", status=400)
+                return
+            run = self.history_mgr.get_run(run_id)
+            if not run:
+                self._send_error_json(f"Run '{run_id}' not found", status=404)
+                return
+            self._send_json(run)
+            return
+
         self._send_error_json(f"Endpoint '{path}' not found", status=404)
 
     def do_POST(self):
@@ -1042,7 +1292,12 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
                 app = self.inspector.inspect(canonical)
                 env = self.env_inspector.inspect()
                 db_ev = self.db.get_by_sha256(app.sha256)
-                plan = self.planner.plan(app, env, db_evidence=db_ev)
+                similar_ev = None
+                if not db_ev:
+                    similar_ev = self.db.find_similar_profiles(
+                        name=app.file_name, format_type=app.format.value, arch=app.architecture.value
+                    )
+                plan = self.planner.plan(app, env, db_evidence=db_ev, similar_evidence=similar_ev)
                 self._send_json(plan.to_dict())
             except Exception as e:
                 self._send_error_json(f"Planning error: {e}", status=500)
@@ -1062,9 +1317,34 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
                 self.security.validate_execution_safety(canonical)
                 app = self.inspector.inspect(canonical)
                 env = self.env_inspector.inspect()
-                plan = self.planner.plan(app, env)
+                db_ev = self.db.get_by_sha256(app.sha256)
+                similar_ev = None
+                if not db_ev:
+                    similar_ev = self.db.find_similar_profiles(
+                        name=app.file_name, format_type=app.format.value, arch=app.architecture.value
+                    )
+                plan = self.planner.plan(app, env, db_evidence=db_ev, similar_evidence=similar_ev)
 
                 if not plan.selected_runtime_id:
+                    self.history_mgr.record_run(
+                        artifact_path=canonical,
+                        artifact_sha256=app.sha256,
+                        application_name=app.file_name,
+                        target_format=app.format.value,
+                        target_architecture=app.architecture.value,
+                        runtime_id="none",
+                        runtime_name="None",
+                        execution_mode="blocked",
+                        dry_run=dry_run,
+                        success=False,
+                        exit_code=2,
+                        execution_time_seconds=0.0,
+                        sandbox_active=False,
+                        network_isolated=True,
+                        stdout="",
+                        stderr=plan.reasoning,
+                        environment={"os": env.os_name, "arch": env.architecture, "kernel": env.kernel_version},
+                    )
                     self._send_json({
                         "success": False,
                         "exit_code": 2,
@@ -1080,6 +1360,25 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
 
                 # If live execution requested but blocked by prerequisites
                 if not dry_run and plan.execution_mode.value == "blocked":
+                    self.history_mgr.record_run(
+                        artifact_path=canonical,
+                        artifact_sha256=app.sha256,
+                        application_name=app.file_name,
+                        target_format=app.format.value,
+                        target_architecture=app.architecture.value,
+                        runtime_id=plan.selected_runtime_id,
+                        runtime_name=plan.selected_runtime_name or "None",
+                        execution_mode="blocked",
+                        dry_run=dry_run,
+                        success=False,
+                        exit_code=2,
+                        execution_time_seconds=0.0,
+                        sandbox_active=False,
+                        network_isolated=True,
+                        stdout="",
+                        stderr=f"Live execution blocked: {plan.reasoning}",
+                        environment={"os": env.os_name, "arch": env.architecture, "kernel": env.kernel_version},
+                    )
                     self._send_json({
                         "success": False,
                         "exit_code": 2,
@@ -1100,6 +1399,27 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
 
                 context = adapter.prepare_environment(app, config={"dry_run": dry_run})
                 result = adapter.execute(app, context, dry_run=dry_run)
+
+                self.history_mgr.record_run(
+                    artifact_path=canonical,
+                    artifact_sha256=app.sha256,
+                    application_name=app.file_name,
+                    target_format=app.format.value,
+                    target_architecture=app.architecture.value,
+                    runtime_id=plan.selected_runtime_id,
+                    runtime_name=plan.selected_runtime_name or "None",
+                    execution_mode=plan.execution_mode.value,
+                    dry_run=dry_run,
+                    success=result.success if not dry_run else True,
+                    exit_code=0 if dry_run else result.exit_code,
+                    execution_time_seconds=0.0 if dry_run else result.execution_time_seconds,
+                    sandbox_active=False,
+                    network_isolated=True,
+                    command=getattr(result, "command", []),
+                    stdout=result.stdout,
+                    stderr=getattr(result, "stderr", ""),
+                    environment={"os": env.os_name, "arch": env.architecture, "kernel": env.kernel_version},
+                )
 
                 if should_record:
                     from zcf.core.models import CompatibilityStatus
@@ -1162,6 +1482,36 @@ class ZCFWebConsoleRequestHandler(BaseHTTPRequestHandler):
                 "cleaned_proton": cleaned_proton,
                 "total": cleaned_wine + cleaned_proton,
             })
+            return
+
+        if path == "/api/history/compare":
+            run_a = payload.get("run_a")
+            run_b = payload.get("run_b")
+            if not run_a or not run_b:
+                self._send_error_json("Missing 'run_a' or 'run_b' in JSON body", status=400)
+                return
+            try:
+                diff = self.history_mgr.compare_runs(run_a, run_b)
+                self._send_json(diff)
+            except Exception as e:
+                self._send_error_json(f"Comparison error: {e}", status=400)
+            return
+
+        if path == "/api/history/delete":
+            run_id = payload.get("id")
+            if not run_id or not isinstance(run_id, str):
+                self._send_error_json("Missing 'id' string in JSON body", status=400)
+                return
+            deleted = self.history_mgr.delete_run(run_id)
+            if not deleted:
+                self._send_error_json(f"Run '{run_id}' not found", status=404)
+                return
+            self._send_json({"success": True, "deleted_id": run_id})
+            return
+
+        if path == "/api/history/clear":
+            count = self.history_mgr.clear_runs()
+            self._send_json({"success": True, "cleared_count": count})
             return
 
         if path == "/api/diag":

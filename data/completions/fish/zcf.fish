@@ -16,6 +16,13 @@ complete -c zcf -n "__fish_use_subcommand" -a "test" -d "Test application capabi
 complete -c zcf -n "__fish_use_subcommand" -a "diag" -d "Analyze failure log and recommend fixes"
 complete -c zcf -n "__fish_use_subcommand" -a "research" -d "Execute 11-step research workflow"
 complete -c zcf -n "__fish_use_subcommand" -a "db" -d "Query compatibility database"
+complete -c zcf -n "__fish_use_subcommand" -a "history" -d "View and compare execution test history"
+
+complete -c zcf -n "__fish_seen_subcommand_from history" -l sha256 -d "Filter runs by artifact SHA-256"
+complete -c zcf -n "__fish_seen_subcommand_from history" -l limit -d "Max number of runs to display"
+complete -c zcf -n "__fish_seen_subcommand_from history" -l compare -d "Compare two run IDs side-by-side"
+complete -c zcf -n "__fish_seen_subcommand_from history" -l clear -d "Clear all stored execution run logs"
+complete -c zcf -n "__fish_seen_subcommand_from history" -l json -d "Output machine-readable JSON"
 
 complete -c zcf -n "__fish_seen_subcommand_from run" -l sandbox -d "Enforce Bubblewrap sandboxing"
 complete -c zcf -n "__fish_seen_subcommand_from run" -l no-sandbox -d "Disable sandboxing"
