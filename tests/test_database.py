@@ -343,6 +343,71 @@ class TestCompatibilityDatabase(unittest.TestCase):
         self.assertGreaterEqual(len(similar), 1)
         self.assertEqual(similar[0].entry_id, "zcf_entry_blender_pe")
 
+    def test_stats_summary(self):
+        """Verifies db.stats() returns a stable summary over all entries."""
+        baseline = self.db.stats()
+        baseline_total = baseline["total"]
+
+        self.db.add_entry(CompatibilityEntry(
+            entry_id="stats_app_a",
+            application_name="Stats App A",
+            target_sha256="1" * 64,
+            target_format="pe",
+            target_architecture="x86_64",
+            status=CompatibilityStatus.VERIFIED_COMPATIBLE,
+            last_verified="2026-10-26T00:00:00Z",
+            recommended_runtime="runtime.wine",
+        ))
+        self.db.add_entry(CompatibilityEntry(
+            entry_id="stats_app_b",
+            application_name="Stats App B",
+            target_sha256="2" * 64,
+            target_format="elf",
+            target_architecture="arm64",
+            status=CompatibilityStatus.UNTESTED,
+            last_verified="2026-10-27T00:00:00Z",
+            recommended_runtime="runtime.qemu-user",
+        ))
+
+        summary = self.db.stats()
+        self.assertEqual(summary["total"], baseline_total + 2)
+        self.assertEqual(summary["schema_version"], "2.0")
+        self.assertEqual(summary["by_status"]["verified_compatible"],
+                         baseline["by_status"].get("verified_compatible", 0) + 1)
+        self.assertEqual(summary["by_status"]["untested"],
+                         baseline["by_status"].get("untested", 0) + 1)
+        self.assertEqual(summary["by_format"]["pe"], baseline["by_format"].get("pe", 0) + 1)
+        self.assertEqual(summary["by_format"]["elf"], baseline["by_format"].get("elf", 0) + 1)
+        self.assertEqual(summary["by_architecture"]["x86_64"],
+                         baseline["by_architecture"].get("x86_64", 0) + 1)
+        self.assertEqual(summary["by_architecture"]["arm64"],
+                         baseline["by_architecture"].get("arm64", 0) + 1)
+        self.assertEqual(summary["by_runtime"]["runtime.wine"],
+                         baseline["by_runtime"].get("runtime.wine", 0) + 1)
+        self.assertEqual(summary["by_runtime"]["runtime.qemu-user"],
+                         baseline["by_runtime"].get("runtime.qemu-user", 0) + 1)
+        self.assertEqual(summary["latest_entry_id"], "stats_app_b")
+        self.assertEqual(summary["latest_verified"], "2026-10-27T00:00:00Z")
+
+        # All expected keys are present
+        self.assertIn("by_provenance_tier", summary)
+        self.assertIn("by_evidence_status", summary)
+
+    def test_stats_structure_on_fresh_database(self):
+        """Verifies db.stats() returns every expected key with valid types."""
+        summary = self.db.stats()
+        self.assertIsInstance(summary["total"], int)
+        self.assertGreaterEqual(summary["total"], 0)
+        self.assertEqual(summary["schema_version"], "2.0")
+        for key in ("by_status", "by_provenance_tier", "by_evidence_status",
+                    "by_format", "by_architecture", "by_runtime"):
+            self.assertIsInstance(summary[key], dict)
+        # latest fields are either None or strings
+        self.assertTrue(summary["latest_entry_id"] is None or
+                        isinstance(summary["latest_entry_id"], str))
+        self.assertTrue(summary["latest_verified"] is None or
+                        isinstance(summary["latest_verified"], str))
+
 
 if __name__ == "__main__":
     unittest.main()
