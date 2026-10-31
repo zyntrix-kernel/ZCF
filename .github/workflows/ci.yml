@@ -7,12 +7,13 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
-    name: Test & Distro Validation
+  test-linux:
+    name: Test & Distro Validation (Linux, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout Source Code
@@ -47,3 +48,32 @@ jobs:
           bash packaging/build_distro_packages.sh
           test -f build/zcf_0.2.0-1_all.deb
           echo "Debian package generated successfully."
+
+  test-windows:
+    name: Windows Smoke Sanity (py3.12)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bytecode Sanity Compile
+        env:
+          PYTHONPATH: src
+        run: python -m compileall -q src/zcf
+
+      - name: CLI Entry Point Smoke Test
+        env:
+          PYTHONPATH: src
+          ZCF_NON_INTERACTIVE: "1"
+        run: python -c "from zcf.cli.main import main; print('cli import ok')"
+
+      - name: Console Entry Point Smoke Test
+        env:
+          PYTHONPATH: src
+          ZCF_NON_INTERACTIVE: "1"
+        run: python -c "import zcf.web.server; print('web server import ok')"

@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [{ name = "Zyntrix Labs", email = "engineering@zyntrixlabs.org" }]
 license = { text = "Apache-2.0" }
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "Intended Audience :: End Users/Desktop",
@@ -38,6 +38,3 @@ zcf-console = "zcf.web.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
