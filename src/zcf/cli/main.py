@@ -464,11 +464,11 @@ def cmd_completions(args):
             print(f.read(), end="")
     else:
         if shell == "bash":
-            print("# bash completion for zcf\ncomplete -W 'dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db service integrate history' zcf")
+            print("# bash completion for zcf\ncomplete -W 'dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db stats service integrate history' zcf")
         elif shell == "zsh":
-            print("#compdef zcf\n_zcf() { _arguments '1: :((dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db service integrate history))' }\n_zcf")
+            print("#compdef zcf\n_zcf() { _arguments '1: :((dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db stats service integrate history))' }\n_zcf")
         elif shell == "fish":
-            print("complete -c zcf -f -a 'dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db service integrate history'")
+            print("complete -c zcf -f -a 'dashboard console web gui run runners snapshot vault taskmgr prescribe components completions inspect env doctor plan test diag research db stats service integrate history'")
 
 
 def cmd_service(args):
@@ -1155,6 +1155,34 @@ def cmd_db(args):
     elif args.action == "import":
         cnt = sync.import_bundle(args.file)
         print(f"Imported and reconciled {cnt} compatibility records.")
+    elif args.action == "stats":
+        summary = db.stats()
+        if getattr(args, "json", False):
+            print(json.dumps(summary, indent=2))
+            return
+        format_header("ZCF Compatibility Database Statistics")
+        print(f"  Total entries:        {summary['total']}")
+        print(f"  Schema version:       {summary['schema_version']}")
+        print(f"  Latest verified:      {summary['latest_verified'] or '—'} ({summary['latest_entry_id'] or '—'})")
+        print()
+        def _print_counts(title, counts):
+            print(f"  {title}:")
+            if not counts:
+                print("    (none)")
+                return
+            for key, value in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+                print(f"    {key:<28} {value}")
+        _print_counts("By status", summary["by_status"])
+        print()
+        _print_counts("By provenance tier", summary["by_provenance_tier"])
+        print()
+        _print_counts("By evidence status", summary["by_evidence_status"])
+        print()
+        _print_counts("By binary format", summary["by_format"])
+        print()
+        _print_counts("By architecture", summary["by_architecture"])
+        print()
+        _print_counts("By recommended runtime", summary["by_runtime"])
 
 
 def cmd_dashboard(args):
@@ -1365,7 +1393,7 @@ def main(argv: Optional[List[str]] = None):
     p_db = subparsers.add_parser("db", help="Query, verify, or manage the compatibility knowledge base")
     p_db.add_argument(
         "action",
-        choices=["list", "show", "query", "submit", "verify", "delete", "export", "import"],
+        choices=["list", "show", "query", "submit", "verify", "delete", "export", "import", "stats"],
         help="Action to perform",
     )
     p_db.add_argument("--id", help="Entry ID (for 'show', 'verify', or 'delete' action)")

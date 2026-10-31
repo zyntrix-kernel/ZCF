@@ -668,6 +668,47 @@ class CompatibilityDatabase:
                     continue
         return entries
 
+    def stats(self) -> Dict[str, Any]:
+        """Aggregate summary statistics over all compatibility entries.
+
+        Returns counts for total entries, status, provenance tier, evidence
+        status, binary format, architecture, and recommended runtime, plus the
+        most recently verified entry. All keys are present even when the
+        database is empty, so callers can render a stable summary table.
+        """
+        entries = self.list_all()
+
+        def _counts(key: str) -> Dict[str, int]:
+            result: Dict[str, int] = {}
+            for entry in entries:
+                value = getattr(entry, key)
+                # Enums expose their canonical string via .value
+                if hasattr(value, "value") and isinstance(getattr(value, "value"), str):
+                    value = value.value
+                if value is None:
+                    value = "unknown"
+                elif not isinstance(value, str):
+                    value = str(value)
+                result[value] = result.get(value, 0) + 1
+            return result
+
+        latest: Optional[CompatibilityEntry] = None
+        if entries:
+            latest = max(entries, key=lambda e: e.last_verified or "")
+
+        return {
+            "total": len(entries),
+            "schema_version": self.SCHEMA_VERSION,
+            "by_status": _counts("status"),
+            "by_provenance_tier": _counts("provenance_tier"),
+            "by_evidence_status": _counts("evidence_status"),
+            "by_format": _counts("target_format"),
+            "by_architecture": _counts("target_architecture"),
+            "by_runtime": _counts("recommended_runtime"),
+            "latest_verified": latest.last_verified if latest else None,
+            "latest_entry_id": latest.entry_id if latest else None,
+        }
+
     def _validate_entry(self, entry: CompatibilityEntry):
         if not entry.entry_id:
             raise DatabaseError("Missing entry_id")
